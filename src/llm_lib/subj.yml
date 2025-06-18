@@ -1,0 +1,9 @@
+services:
+
+  auto:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir : /code/rundir
+    command     : |
+      sh -c "pytest -v --log-cli-level=INFO /pysubj/generic.py"
