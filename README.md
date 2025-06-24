@@ -8,7 +8,7 @@ The CVDP Benchmark is a framework for evaluating LLM and agent solutions on hard
 
 **Paper**: For detailed methodology and evaluation results, see our arXiv preprint: [Comprehensive Verilog Design Problems: A Next-Generation Benchmark Dataset for Evaluating Large Language Models and Agents on RTL Design and Verification](https://arxiv.org/abs/2506.14074).
 
-**Dataset Notes**: The dataset published on Hugging Face contains the vast majority of evaluation problems discussed in the preprint. Twenty datapoints were omitted from the initial public release release due to test harness issues and licensing restrictions.
+**Dataset Notes**: The dataset published on Hugging Face contains the vast majority of evaluation problems discussed in the preprint. Twenty datapoints were omitted from the initial public release release due to test harness issues and licensing restrictions. Additionally, we excluded the reference solutions—‘output’ for non-agentic and ‘patch’ for agentic—from the initial dataset release to help mitigate data contamination. We hope to make these available in the future; if you have an immediate need, please feel free to reach out to discuss.
 
 
 ## Quick Start
