@@ -225,4 +225,3 @@ python run_samples.py -f dataset.jsonl -l -g agent-v2 -n 5 -p work_experiment_v2
 - 📖 **Learn More**: [Main README](../README.md) for complete benchmark documentation
 - 🤖 **Try Non-Agentic**: [Non-Agentic Workflow Guide](../README_NON_AGENTIC.md)
 - 🔧 **Try Agentic**: [Agentic Workflow Guide](../README_AGENTIC.md)
-- 🧪 **Run Tests**: [Test Suite](../tests/README.md) for validation examples

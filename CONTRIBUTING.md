@@ -22,13 +22,6 @@
 ```
 
 - Ensure that the build log is clean, meaning no warnings or errors should be present.
-
-- Ensure that all tests pass prior to submitting your code by running the regression suite:
-  ```bash
-  # Run the test suite
-  python -m pytest tests/
-  ```
-
 - All components must contain accompanying documentation (READMEs) describing the functionality, dependencies, and known issues.
 
   - See `README.md` for existing benchmarks and tools for reference.

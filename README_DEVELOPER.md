@@ -233,40 +233,6 @@ The `parallel_executor.py` module provides thread-safe execution management:
 - **Exception handling** with detailed error reporting
 - **Resource cleanup** ensuring Docker containers are properly terminated
 
-## Test Suite Architecture
-
-### Test Categories and Structure
-
-The test suite (in `tests/`) provides comprehensive validation:
-
-**Fast Suite (Development):**
-- Core functionality validation in 2-3 minutes
-- Optimized for development workflow
-- Essential pass/fail verification
-
-**Full Suite (CI/Production):**
-- Comprehensive validation covering all scenarios
-- 5+ minutes execution time
-- Release validation and edge case coverage
-
-### Expected Test Results
-
-| Test Category | Expected Pass Rate | Purpose |
-|---------------|-------------------|---------|
-| **Golden Mode** | ~90-100% | Reference solution validation |
-| **No-Patch Mode** | Exactly 0% | Negative control verification |
-| **LLM Non-Agentic** | ~23% | LLM performance baseline |
-| **Agent Mode** | ~0%* | Agent execution validation |
-| **Force Modes** | ~90-100% | Dataset transformation testing |
-
-*Agent mode tests completion, not necessarily correctness
-
-### Test Data Requirements
-
-Critical test IDs that must exist for compatibility:
-- `cvdp_copilot_cellular_automata_0017` (non-agentic dataset)
-- `cvdp_agentic_run_length_0001` (agentic dataset)
-
 ## Configuration Management
 
 ### Environment Variables
@@ -377,7 +343,6 @@ The `data_transformer.py` module provides automatic conversion between formats:
    - Include configuration management
 
 3. **Testing Phase**
-   - Add tests to both fast and full regression suites
    - Test with both non-agentic and agentic datasets
    - Verify backward compatibility
 
@@ -427,7 +392,6 @@ docker ps -a | grep cvdp
 - Use non-root users where possible
 
 ### Testing Standards
-- All new features must include regression tests
 - Test both positive and negative cases
 - Include performance benchmarks for resource-intensive operations
 - Maintain backward compatibility for dataset formats
@@ -475,7 +439,6 @@ docker ps -a | grep cvdp
 ### Release Checklist
 
 1. **Testing:**
-   - Run full regression suite successfully
    - Validate on representative datasets
    - Test custom model and agent integrations
 
