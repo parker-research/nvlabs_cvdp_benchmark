@@ -1,3 +1,7 @@
 This project will download and install additional third-party open source
 software projects.  Review the license terms of these open source projects
 before use.
+
+The directory example_dataset/ contains datapoints that are licensed under
+CC BY 4.0 (non-code) and Apache-2.0 (code) licenses. Datapoints are
+Copyright 2025 NVIDIA Corporation.

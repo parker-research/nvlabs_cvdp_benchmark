@@ -1,6 +1,7 @@
 cvdp_*
 *.json
 *.jsonl
+!/example_dataset/*.jsonl
 *.log
 __pycache__
 /.env
