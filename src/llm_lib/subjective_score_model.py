@@ -66,6 +66,18 @@ class SubjectiveScoreModel_Instance:
         """
         self.debug = debug
         logging.info(f"Debug mode {'enabled' if debug else 'disabled'}")
+
+    @property
+    def requires_evaluation(self) -> bool:
+        """
+        Whether this model requires harness evaluation.
+        
+        Default is True for backward compatibility.
+        
+        Returns:
+            bool: True (standard models require evaluation)
+        """
+        return True
     
     def subjective_score(self, response: str, reference: str, problem_prompt: str = "") -> float:
         """

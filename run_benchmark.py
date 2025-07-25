@@ -72,8 +72,13 @@ class CopilotBenchmark(wrapper.CopilotWrapper):
                 # Prepare all repositories
                 self.repo.all_prepare(self.model)
 
-                # Run all tests
-                res = self.repo.all_run(self.model)
+                # Skip evaluation for models that don't require it (e.g., local_export)
+                if hasattr(self.model, 'requires_evaluation') and not self.model.requires_evaluation:
+                    print("Skipping evaluation - model does not require harness execution (export mode)")
+                    res = {}  # Return empty results for export mode
+                else:
+                    # Run all tests
+                    res = self.repo.all_run(self.model)
             else:
                 with open (runs_file, 'r+') as runs_f:
                     runs = runs_f.readlines()
@@ -93,9 +98,14 @@ class CopilotBenchmark(wrapper.CopilotWrapper):
             # Create prefix directory if it doesn't exist
             os.makedirs(self.repo.prefix, exist_ok=True)
             
-            # Write results to prefix directory
-            with open(raw_result_path, "w+") as f:
-                f.write(json.dumps(res))
+            # Only write results to file if the model requires evaluation
+            # (e.g., skip for local_export mode which only generates prompts)
+            if hasattr(self.model, 'requires_evaluation') and not self.model.requires_evaluation:
+                print("Skipping raw_result.json creation - model does not require harness execution (export mode)")
+            else:
+                # Write results to prefix directory
+                with open(raw_result_path, "w+") as f:
+                    f.write(json.dumps(res))
 
         return res
 
@@ -150,23 +160,39 @@ class CopilotBenchmark(wrapper.CopilotWrapper):
                 if hasattr(self.repo, 'th_agent'):
                     self.repo.th_agent(issue)
             
-            result = self.repo.run(issue, obj, repo, self.model)
+            # Skip evaluation for models that don't require it (e.g., local_export)
+            if hasattr(self.model, 'requires_evaluation') and not self.model.requires_evaluation:
+                print(f"Skipping evaluation for issue {issue} - model does not require harness execution (export mode)")
+                # Create a minimal result structure for export mode
+                result = {
+                    "category": "export_mode",
+                    "difficulty": "export_mode", 
+                    "tests": [],
+                    "errors": 0
+                }
+            else:
+                result = self.repo.run(issue, obj, repo, self.model)
             
-            # Store this single result in a raw_result file
-            with open(raw_result_path, "a+") as f:
-                # Try to load existing file first
-                try:
-                    f.seek(0)
-                    content = f.read()
-                    if content:
-                        all_results = json.loads(content)
-                    else:
+            # Only store result in file if the model requires evaluation
+            # (e.g., skip for local_export mode which only generates prompts)
+            if hasattr(self.model, 'requires_evaluation') and not self.model.requires_evaluation:
+                print(f"Skipping raw_result.json update for issue {issue} - model does not require harness execution (export mode)")
+            else:
+                # Store this single result in a raw_result file
+                with open(raw_result_path, "a+") as f:
+                    # Try to load existing file first
+                    try:
+                        f.seek(0)
+                        content = f.read()
+                        if content:
+                            all_results = json.loads(content)
+                        else:
+                            all_results = {}
+                    except json.JSONDecodeError:
                         all_results = {}
-                except json.JSONDecodeError:
-                    all_results = {}
-                
-                # Update with new result and write back
-                all_results[issue] = result
+                    
+                    # Update with new result and write back
+                    all_results[issue] = result
                 f.seek(0)
                 f.truncate()
                 f.write(json.dumps(all_results, indent=2))
@@ -241,26 +267,42 @@ class AgenticBenchmark(wrapper.AgenticWrapper):
                 if hasattr(self.repo, 'th_agent'):
                     self.repo.th_agent(issue)
             
-            result = self.repo.run(issue, obj, repo, self.model)
+            # Skip evaluation for models that don't require it (e.g., local_export)
+            if hasattr(self.model, 'requires_evaluation') and not self.model.requires_evaluation:
+                print(f"Skipping evaluation for issue {issue} - model does not require harness execution (export mode)")
+                # Create a minimal result structure for export mode
+                result = {
+                    "category": "export_mode",
+                    "difficulty": "export_mode", 
+                    "tests": [],
+                    "errors": 0
+                }
+            else:
+                result = self.repo.run(issue, obj, repo, self.model)
             
-            # Store this single result in a raw_result file
-            with open(raw_result_path, "a+") as f:
-                # Try to load existing file first
-                try:
-                    f.seek(0)
-                    content = f.read()
-                    if content:
-                        all_results = json.loads(content)
-                    else:
+            # Only store result in file if the model requires evaluation
+            # (e.g., skip for local_export mode which only generates prompts)
+            if hasattr(self.model, 'requires_evaluation') and not self.model.requires_evaluation:
+                print(f"Skipping raw_result.json update for issue {issue} - model does not require harness execution (export mode)")
+            else:
+                # Store this single result in a raw_result file
+                with open(raw_result_path, "a+") as f:
+                    # Try to load existing file first
+                    try:
+                        f.seek(0)
+                        content = f.read()
+                        if content:
+                            all_results = json.loads(content)
+                        else:
+                            all_results = {}
+                    except json.JSONDecodeError:
                         all_results = {}
-                except json.JSONDecodeError:
-                    all_results = {}
-                
-                # Update with new result and write back
-                all_results[issue] = result
-                f.seek(0)
-                f.truncate()
-                f.write(json.dumps(all_results, indent=2))
+                    
+                    # Update with new result and write back
+                    all_results[issue] = result
+                    f.seek(0)
+                    f.truncate()
+                    f.write(json.dumps(all_results, indent=2))
             
             return result
         else:
@@ -427,7 +469,13 @@ if __name__ == "__main__":
     if args.llm and (not args.agent):
         # Use default model if none was specified
         model_to_use = args.model if args.model is not None else config.get("DEFAULT_MODEL")
-        obj.create_model(version=model_to_use)
+        
+        # Handle local inference file paths
+        model_kwargs = {}
+        if hasattr(args, 'prompts_responses_file') and args.prompts_responses_file:
+            model_kwargs['file_path'] = args.prompts_responses_file
+        
+        obj.create_model(version=model_to_use, **model_kwargs)
 
     try:
         # If --regenerate-report flag is used and raw_result.json exists, load it directly
@@ -467,24 +515,33 @@ if __name__ == "__main__":
                         'copilot_refine': args.copilot_refine
                     })
                     
-                    # Read the entire raw_result.json to generate a complete report
-                    raw_result_path = os.path.join(args.prefix, "raw_result.json")
-                    with open(raw_result_path, 'r') as f:
-                        all_results = json.load(f)
-                    
-                    # Create a report using all available results
-                    rpt = report.Report(all_results, prefix=args.prefix, dataset_path=filename, 
-                                      golden_mode=(not args.llm), 
-                                      disable_patch=args.no_patch,
-                                      model_agent=model_agent_value,
-                                      force_agentic=args.force_agentic,
-                                      force_agentic_include_golden=args.force_agentic_include_golden,
-                                      force_agentic_include_harness=args.force_agentic_include_harness,
-                                      force_copilot=args.force_copilot,
-                                      copilot_refine=args.copilot_refine)
-                    rpt.report_header()
-                    rpt.report_categories()
-                    rpt.report_timers()
+                    # Skip report generation for models that don't require evaluation (e.g., local_export)
+                    if hasattr(obj.model, 'requires_evaluation') and not obj.model.requires_evaluation:
+                        print(f"\n=== Export Mode Summary for Issue {args.id} ===")
+                        print("Prompt has been exported successfully.")
+                        print("No evaluation report generated since no harness execution occurred.")
+                        if hasattr(obj.model, 'file_path'):
+                            print(f"Prompts saved to: {obj.model.file_path}")
+                        print("Use --model local_import with --prompts-responses-file to evaluate responses.")
+                    else:
+                        # Read the entire raw_result.json to generate a complete report
+                        raw_result_path = os.path.join(args.prefix, "raw_result.json")
+                        with open(raw_result_path, 'r') as f:
+                            all_results = json.load(f)
+                        
+                        # Create a report using all available results
+                        rpt = report.Report(all_results, prefix=args.prefix, dataset_path=filename, 
+                                          golden_mode=(not args.llm), 
+                                          disable_patch=args.no_patch,
+                                          model_agent=model_agent_value,
+                                          force_agentic=args.force_agentic,
+                                          force_agentic_include_golden=args.force_agentic_include_golden,
+                                          force_agentic_include_harness=args.force_agentic_include_harness,
+                                          force_copilot=args.force_copilot,
+                                          copilot_refine=args.copilot_refine)
+                        rpt.report_header()
+                        rpt.report_categories()
+                        rpt.report_timers()
                     
                     # Check for agent logfile
                     if 'agent_logfile' in exec_result:
@@ -498,23 +555,32 @@ if __name__ == "__main__":
                 # Full benchmark mode (original functionality)
                 res = obj.benchmark(runs_file=args.answers)
 
-                # Create report and print results
-                rpt = report.Report(
-                    res, 
-                    prefix=args.prefix, 
-                    dataset_path=filename, 
-                    golden_mode=(not args.llm), 
-                    disable_patch=args.no_patch, 
-                    model_agent=args.agent if args.agent else (args.model if args.model is not None else config.get("DEFAULT_MODEL")),
-                    force_agentic=args.force_agentic,
-                    force_agentic_include_golden=args.force_agentic_include_golden,
-                    force_agentic_include_harness=args.force_agentic_include_harness,
-                    force_copilot=args.force_copilot,
-                    copilot_refine=args.copilot_refine
-                )
-                rpt.report_header()  # Add header with metadata
-                rpt.report_categories()
-                rpt.report_timers()
+                # Skip report generation for models that don't require evaluation (e.g., local_export)
+                if hasattr(obj.model, 'requires_evaluation') and not obj.model.requires_evaluation:
+                    print("\n=== Export Mode Summary ===")
+                    print("Prompts have been exported successfully.")
+                    print("No evaluation report generated since no harness execution occurred.")
+                    if hasattr(obj.model, 'file_path'):
+                        print(f"Prompts saved to: {obj.model.file_path}")
+                    print("Use --model local_import with --prompts-responses-file to evaluate responses.")
+                else:
+                    # Create report and print results
+                    rpt = report.Report(
+                        res, 
+                        prefix=args.prefix, 
+                        dataset_path=filename, 
+                        golden_mode=(not args.llm), 
+                        disable_patch=args.no_patch, 
+                        model_agent=args.agent if args.agent else (args.model if args.model is not None else config.get("DEFAULT_MODEL")),
+                        force_agentic=args.force_agentic,
+                        force_agentic_include_golden=args.force_agentic_include_golden,
+                        force_agentic_include_harness=args.force_agentic_include_harness,
+                        force_copilot=args.force_copilot,
+                        copilot_refine=args.copilot_refine
+                    )
+                    rpt.report_header()  # Add header with metadata
+                    rpt.report_categories()
+                    rpt.report_timers()
 
     except Exception as e:
         raise Exception(f"Unable to process the JSON file: {filename}. Error: {str(e)}")
