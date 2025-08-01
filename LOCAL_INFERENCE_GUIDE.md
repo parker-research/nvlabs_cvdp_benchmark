@@ -40,7 +40,7 @@ This allows you to run inference on your local models without modifying the core
 
 ### Export Prompts
 ```bash
-python run_benchmark.py dataset.jsonl \
+python run_benchmark.py -f dataset.jsonl \
   --model local_export \
   --prompts-responses-file prompts.jsonl \
   --llm \
@@ -49,7 +49,7 @@ python run_benchmark.py dataset.jsonl \
 
 ### Import Responses
 ```bash
-python run_benchmark.py dataset.jsonl \
+python run_benchmark.py -f dataset.jsonl \
   --model local_import \
   --prompts-responses-file responses.jsonl \
   --llm \
@@ -59,14 +59,14 @@ python run_benchmark.py dataset.jsonl \
 ### Multi-Sampling
 ```bash
 # Export (same command - automatically deduplicated)
-python run_samples.py dataset.jsonl \
+python run_samples.py -f dataset.jsonl \
   --model local_export \
   --prompts-responses-file prompts.jsonl \
   --samples 5 \
   --prefix experiment1
 
 # Import with multiple completions per problem
-python run_samples.py dataset.jsonl \
+python run_samples.py -f dataset.jsonl \
   --model local_import \
   --prompts-responses-file responses.jsonl \
   --samples 5 \
@@ -77,7 +77,7 @@ python run_samples.py dataset.jsonl \
 
 ### Step 1: Export Prompts
 ```bash
-python run_benchmark.py your_dataset.jsonl \
+python run_benchmark.py -f your_dataset.jsonl \
   --model local_export \
   --prompts-responses-file prompts.jsonl \
   --llm
@@ -91,7 +91,7 @@ Process the exported prompts with your local model and create a `responses.jsonl
 
 ### Step 3: Import and Evaluate
 ```bash
-python run_benchmark.py your_dataset.jsonl \
+python run_benchmark.py -f your_dataset.jsonl \
   --model local_import \
   --prompts-responses-file responses.jsonl \
   --llm
