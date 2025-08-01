@@ -250,6 +250,27 @@ python run_benchmark.py -f dataset.jsonl -l -m custom-model -c /path/to/factory.
 - **`dataset_subset_creator.py`** - Create dataset subsets by criteria
 - **`merge_dataset_files.py`** - Combine multiple dataset files
 - **`refinement_analysis.py`** - Analyze iterative problem-solving patterns
+- **`jsonl_to_yaml.py`** - Convert JSONL datasets to human-readable YAML format and back
+
+#### Using jsonl_to_yaml.py
+
+Convert JSONL datasets to YAML for easier reading and editing:
+
+```bash
+# Convert JSONL to single YAML file (multi-document)
+tools/jsonl_to_yaml.py dataset.jsonl
+
+# Convert to separate YAML files (one per problem)
+tools/jsonl_to_yaml.py dataset.jsonl --separate-files
+
+# Convert YAML back to JSONL
+tools/jsonl_to_yaml.py converted_file.yaml -o restored_dataset.jsonl
+
+# Test roundtrip conversion (ensure lossless conversion)
+tools/jsonl_to_yaml.py dataset.jsonl --test-roundtrip
+```
+
+The tool preserves all data and supports automatic file type detection. Use this when you need to manually inspect or edit dataset files in a more readable format.
 
 ### Developer Resources
 For internal development, architecture details, and contribution guidelines - see **[README_DEVELOPER.md](README_DEVELOPER.md)**
