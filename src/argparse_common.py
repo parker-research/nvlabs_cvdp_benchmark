@@ -9,6 +9,7 @@ between run_benchmark.py and run_samples.py.
 """
 
 import argparse
+import os
 from .config_manager import config
 
 
@@ -44,6 +45,10 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     #                    help="Inform the system to run the docker locally.")
     parser.add_argument("-g", "--agent", type=str,
                        help="Select the agent to run the analysis.")
+    
+    # Local inference arguments (copilot mode only)
+    parser.add_argument("--prompts-responses-file", type=str,
+                       help="JSONL file for local inference: exports prompts (local_export) or imports responses (local_import)")
     
     # Output and configuration arguments
     parser.add_argument("-p", "--prefix", default=default_prefix, type=str,
@@ -109,6 +114,28 @@ def add_validation_checks(args: argparse.Namespace) -> None:
         
         if model_specified and agent_specified:
             print("Error: Cannot specify both --model and --agent together. Use either model-based LLM or agent-based processing.")
+            exit(1)
+    
+    # Validate local inference arguments
+    if hasattr(args, 'prompts_responses_file'):
+        # Check that local inference models are used with the file argument
+        if args.model in ['local_export', 'local_import'] and not args.prompts_responses_file:
+            print(f"Error: --model {args.model} requires --prompts-responses-file")
+            exit(1)
+        
+        # Check that the file argument is used with appropriate models
+        if args.prompts_responses_file and args.model not in ['local_export', 'local_import']:
+            print("Error: --prompts-responses-file requires --model local_export or --model local_import")
+            exit(1)
+        
+        # Check that import file exists for import mode
+        if args.model == 'local_import' and args.prompts_responses_file and not os.path.exists(args.prompts_responses_file):
+            print(f"Error: Response file not found: {args.prompts_responses_file}")
+            exit(1)
+        
+        # Local inference only works with copilot mode (not agentic)
+        if args.prompts_responses_file and args.agent:
+            print("Error: Local inference modes are not compatible with --agent (agentic mode)")
             exit(1)
 
 

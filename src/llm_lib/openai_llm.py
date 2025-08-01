@@ -53,6 +53,18 @@ class OpenAI_Instance:
     def key(self, key):
         self.chat = openai.OpenAI(api_key=key)
 
+    @property
+    def requires_evaluation(self) -> bool:
+        """
+        Whether this model requires harness evaluation.
+        
+        Default is True for backward compatibility.
+        
+        Returns:
+            bool: True (standard models require evaluation)
+        """
+        return True
+
     # ----------------------------------------
     # - Prompt a new Request
     # ----------------------------------------

@@ -10,6 +10,7 @@ from src.config_manager import config
 # Import model-specific instances
 from .openai_llm import OpenAI_Instance
 from .subjective_score_model import SubjectiveScoreModel_Instance
+from .local_inference_model import LocalInferenceModel
 
 logging.basicConfig(level=logging.INFO)
 
@@ -31,6 +32,10 @@ class ModelFactory:
             
             # Subjective scoring model
             "sbj_score": self._create_subjective_score_instance,
+            
+            # Local inference models
+            "local_export": self._create_local_export_instance,
+            "local_import": self._create_local_import_instance,
         }
 
     def create_model(self, model_name: str, context: Any = None, key: Optional[str] = None, **kwargs) -> Any:
@@ -76,6 +81,16 @@ class ModelFactory:
         else:
             # Use default model
             return SubjectiveScoreModel_Instance(context=context, key=key)
+    
+    def _create_local_export_instance(self, model_name: str, context: Any, key: Optional[str], **kwargs) -> LocalInferenceModel:
+        """Create a Local Export model instance"""
+        file_path = kwargs.get('file_path', 'exported_prompts.jsonl')
+        return LocalInferenceModel(context=context, mode='export', file_path=file_path, key=key, model=model_name)
+    
+    def _create_local_import_instance(self, model_name: str, context: Any, key: Optional[str], **kwargs) -> LocalInferenceModel:
+        """Create a Local Import model instance"""
+        file_path = kwargs.get('file_path', 'responses.jsonl')
+        return LocalInferenceModel(context=context, mode='import', file_path=file_path, key=key, model=model_name)
 
     def register_model_type(self, model_identifier: str, factory_method):
         """

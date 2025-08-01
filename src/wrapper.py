@@ -37,10 +37,10 @@ class CopilotWrapper:
         self.network_name           = network_name
         self.manage_network         = manage_network
 
-    def create_model(self, version = None):
+    def create_model(self, version = None, **kwargs):
         if version is None:
             version = config.get("DEFAULT_MODEL")
-        self.model = self.factory.create_model(model_name=version, context=self.repo.folders)
+        self.model = self.factory.create_model(model_name=version, context=self.repo.folders, **kwargs)
         
     def benchmark(self, runs_file = None):
         if runs_file is None:
@@ -77,10 +77,15 @@ class CopilotWrapper:
         # Create prefix directory if it doesn't exist
         os.makedirs(self.repo.prefix, exist_ok=True)
         
-        # Write results to prefix directory
-        raw_result_path = os.path.join(self.repo.prefix, "raw_result.json")
-        with open(raw_result_path, "w+") as f:
-            f.write(json.dumps(res))
+        # Only write results to file if the model requires evaluation
+        # (e.g., skip for local_export mode which only generates prompts)
+        if hasattr(self.model, 'requires_evaluation') and not self.model.requires_evaluation:
+            print("Skipping raw_result.json creation - model does not require harness execution (export mode)")
+        else:
+            # Write results to prefix directory
+            raw_result_path = os.path.join(self.repo.prefix, "raw_result.json")
+            with open(raw_result_path, "w+") as f:
+                f.write(json.dumps(res))
 
         return res
 
@@ -163,10 +168,15 @@ class AgenticWrapper (CopilotWrapper):
         # Create prefix directory if it doesn't exist
         os.makedirs(self.repo.prefix, exist_ok=True)
         
-        # Write results to prefix directory
-        raw_result_path = os.path.join(self.repo.prefix, "raw_result.json")
-        with open(raw_result_path, "w+") as f:
-            f.write(json.dumps(res))
+        # Only write results to file if the model requires evaluation
+        # (e.g., skip for local_export mode which only generates prompts)
+        if hasattr(self.model, 'requires_evaluation') and not self.model.requires_evaluation:
+            print("Skipping raw_result.json creation - model does not require harness execution (export mode)")
+        else:
+            # Write results to prefix directory
+            raw_result_path = os.path.join(self.repo.prefix, "raw_result.json")
+            with open(raw_result_path, "w+") as f:
+                f.write(json.dumps(res))
 
         return res
 

@@ -74,6 +74,21 @@ python run_benchmark.py -f dataset.jsonl
 
 **Note**: When using `--llm` mode, you cannot specify both `--model` and `--agent` together. Use either model-based LLM processing or agent-based processing.
 
+### Local Inference
+For using local models instead of API-based models, use the two-step export/import process:
+
+```bash
+# Step 1: Export prompts
+python run_benchmark.py -f dataset.jsonl --model local_export --prompts-responses-file prompts.jsonl --llm
+
+# Step 2: Run your local model on prompts.jsonl to generate responses.jsonl
+
+# Step 3: Import and evaluate responses
+python run_benchmark.py -f dataset.jsonl --model local_import --prompts-responses-file responses.jsonl --llm
+```
+
+👉 **[Complete Local Inference Guide](LOCAL_INFERENCE_GUIDE.md)**
+
 ### Multi-Sample Evaluation (Pass@k)
 ```bash
 # Run 5 samples with non-agentic workflow
@@ -444,7 +459,8 @@ For detailed configuration and implementation details, see [README_DEVELOPER.md]
 ## Documentation Index
 
 - **[README_NON_AGENTIC.md](README_NON_AGENTIC.md)** - Complete guide for non-agentic evaluation workflow
-- **[README_AGENTIC.md](README_AGENTIC.md)** - Complete guide for Docker agent evaluation workflow  
+- **[README_AGENTIC.md](README_AGENTIC.md)** - Complete guide for Docker agent evaluation workflow
+- **[LOCAL_INFERENCE_GUIDE.md](LOCAL_INFERENCE_GUIDE.md)** - Guide for using local models instead of API-based models
 - **[Custom Verification Images](#custom-verification-images-verif_eda_image)** - Docker images with Cadence Xcelium and enterprise verification tools
 - **[examples/README.md](examples/README.md)** - Custom model and agent development for end users
 - **[README_DEVELOPER.md](README_DEVELOPER.md)** - Internal development and architecture documentation

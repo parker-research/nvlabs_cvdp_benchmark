@@ -175,6 +175,7 @@ cd work_debug/cvdp_agentic_fixed_arbiter_0001/harness/1/
 
 **Resources:**
 - **Full Dataset**: Download from [🤗 nvidia/cvdp-benchmark-dataset](https://huggingface.co/datasets/nvidia/cvdp-benchmark-dataset)
+- **Local Inference**: See [Local Inference Guide](LOCAL_INFERENCE_GUIDE.md) for using local models instead of API calls
 - **Custom Models**: See [Non-Agentic Guide](README_NON_AGENTIC.md) for custom model development
 - **Custom Agents**: See [Agentic Guide](README_AGENTIC.md) for building your own agents  
 - **Advanced Features**: See [Examples](examples/README.md) for model factories and custom implementations
@@ -186,6 +187,7 @@ For comprehensive documentation including detailed installation instructions, co
 
 - **[README_FULL.md](README_FULL.md)** - Complete documentation with detailed guides and configuration
 - **[README_NON_AGENTIC.md](README_NON_AGENTIC.md)** - Complete guide for non-agentic evaluation workflow
-- **[README_AGENTIC.md](README_AGENTIC.md)** - Complete guide for Docker agent evaluation workflow  
+- **[README_AGENTIC.md](README_AGENTIC.md)** - Complete guide for Docker agent evaluation workflow
+- **[LOCAL_INFERENCE_GUIDE.md](LOCAL_INFERENCE_GUIDE.md)** - Guide for using local models instead of API-based models
 - **[examples/README.md](examples/README.md)** - Custom model and agent development for end users
 - **[README_DEVELOPER.md](README_DEVELOPER.md)** - Internal development and architecture documentation
