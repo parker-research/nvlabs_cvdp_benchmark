@@ -9,6 +9,7 @@ from src.config_manager import config
 
 # Import model-specific instances
 from .openai_llm import OpenAI_Instance
+from .openai_llm_responses import OpenAI_Responses_Instance
 from .subjective_score_model import SubjectiveScoreModel_Instance
 from .local_inference_model import LocalInferenceModel
 
@@ -29,6 +30,7 @@ class ModelFactory:
             "gpt-4-turbo": self._create_openai_instance,
             "gpt-4o": self._create_openai_instance,
             "gpt-4o-mini": self._create_openai_instance,
+            "o3-pro": self._create_openai_responses_instance,
             
             # Subjective scoring model
             "sbj_score": self._create_subjective_score_instance,
@@ -69,6 +71,10 @@ class ModelFactory:
     def _create_openai_instance(self, model_name: str, context: Any, key: Optional[str], **kwargs) -> OpenAI_Instance:
         """Create an OpenAI model instance"""
         return OpenAI_Instance(context=context, key=key, model=model_name)
+    
+    def _create_openai_responses_instance(self, model_name: str, context: Any, key: Optional[str], **kwargs) -> OpenAI_Responses_Instance:
+        """Create an OpenAI model instance using responses"""
+        return OpenAI_Responses_Instance(context=context, key=key, model=model_name)
     
     def _create_subjective_score_instance(self, model_name: str, context: Any, key: Optional[str], **kwargs) -> SubjectiveScoreModel_Instance:
         """Create a Subjective Scoring model instance"""
