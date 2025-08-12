@@ -193,9 +193,9 @@ class CopilotBenchmark(wrapper.CopilotWrapper):
                     
                     # Update with new result and write back
                     all_results[issue] = result
-                f.seek(0)
-                f.truncate()
-                f.write(json.dumps(all_results, indent=2))
+                    f.seek(0)
+                    f.truncate()
+                    f.write(json.dumps(all_results, indent=2))
             
             return result
         else:
