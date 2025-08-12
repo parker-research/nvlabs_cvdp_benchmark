@@ -236,15 +236,24 @@ def run_samples(args: argparse.Namespace, n_samples: int, k_threshold: int) -> N
     
     # Setup shared Docker network for all samples if not just regenerating reports
     shared_network_name = None
+    license_network_auto_created = False  # Track if we auto-create the license network
     if not regenerate_only:
         # Clean up filename to ensure consistent network naming
         filename = args.filename.replace('"', "").replace("'", "")
         
-        # Generate a network name based on the dataset file
+        # Generate a network name based on the dataset file for the default network
         shared_network_name = network_util.generate_network_name(filename, shared=True)
         print(f"Using shared Docker network for all samples: {shared_network_name}")
         
-        # Create the network
+        # Commercial EDA datasets will have an additional license network (handled separately)
+        if eda_validation['required']:
+            print(f"Commercial EDA datasets will also use license network: {eda_validation['network_name']}")
+            # License network creation and cleanup is handled during EDA validation
+            # Just update our local flag if it was auto-created
+            if eda_validation.get('auto_created', False):
+                license_network_auto_created = True
+        
+        # Create the default network and register cleanup
         if network_util.create_docker_network(shared_network_name):
             # Register cleanup function to remove the network on exit
             def cleanup_network():
@@ -344,12 +353,7 @@ def run_samples(args: argparse.Namespace, n_samples: int, k_threshold: int) -> N
         k_threshold=k_threshold
     )
     
-    # Clean up shared network
-    # This cleanup is handled by the atexit handler, but add it here explicitly
-    # only if we haven't registered the atexit handler for some reason
-    if shared_network_name and not regenerate_only and not hasattr(atexit, "_network_cleanup_registered"):
-        print(f"Cleaning up shared Docker network: {shared_network_name}")
-        network_util.remove_docker_network(shared_network_name)
+    # Network cleanup is handled by atexit handlers registered during network creation
 
 if __name__ == "__main__":
     # Create main parser

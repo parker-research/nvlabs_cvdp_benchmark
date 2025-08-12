@@ -13,16 +13,14 @@ import sys
 class CopilotWrapper:
 
     def __init__(self, filename, golden = True, debug = False, host = False, prefix = None, custom_factory_path = None, network_name = None, manage_network = True, copilot_refine = None):
-        self.repo = dataset_processor.CopilotProcessor(filename = filename, golden = golden, debug = debug, host = host, prefix = prefix)
+        self.repo = dataset_processor.CopilotProcessor(filename = filename, golden = golden, debug = debug, host = host, prefix = prefix, network_name = network_name, manage_network = manage_network)
         # Enable refinement if requested
         if copilot_refine:
             self.repo.include_golden_patch = True
             self.repo.include_harness = True
             self.repo.refine_model = copilot_refine
         
-        if network_name:
-            self.repo.network_name = network_name
-            self.repo.manage_network = manage_network
+        # Network configuration is now passed during Repository construction
         self.model = None
         self.factory = load_custom_factory(custom_factory_path)
         
@@ -106,25 +104,27 @@ class CopilotWrapper:
 
 class AgenticWrapper (CopilotWrapper):
 
-    def __init__(self, filename, golden = True, debug = False, host = False, prefix = None, custom_factory_path = None, network_name = None, manage_network = True, force_agentic = False, force_agentic_include_golden = False, force_agentic_include_harness = False, force_copilot = False, copilot_refine = None):
+    def __init__(self, filename, golden = True, debug = False, host = False, prefix = None, custom_factory_path = None, network_name = None, manage_network = True, force_agentic = False, force_agentic_include_golden = False, force_agentic_include_harness = False, force_copilot = False, copilot_refine = None, repo_url = None, commit_hash = None):
         self.force_agentic = force_agentic
         self.force_agentic_include_golden = force_agentic_include_golden
         self.force_agentic_include_harness = force_agentic_include_harness
         self.force_copilot = force_copilot
         self.copilot_refine = copilot_refine
+        self.repo_url = repo_url
+        self.commit_hash = commit_hash
         
         # The transformation is now handled before creating the wrapper
         # but we keep the transformation methods available
         
-        self.repo = dataset_processor.AgenticProcessor(filename = filename, golden = golden, debug = debug, host = host, prefix = prefix)
+        self.repo = dataset_processor.AgenticProcessor(filename = filename, golden = golden, debug = debug, host = host, prefix = prefix, network_name = network_name, manage_network = manage_network)
         
         # Pass the include parameters to the repo
         self.repo.include_golden_patch = force_agentic_include_golden
         self.repo.include_harness = force_agentic_include_harness
         
-        if network_name:
-            self.repo.network_name = network_name
-            self.repo.manage_network = manage_network
+        # Pass git repository parameters to the repo
+        self.repo.repo_url = repo_url
+        self.repo.commit_hash = commit_hash
         
         self.model = None
         self.factory = load_custom_factory(custom_factory_path)

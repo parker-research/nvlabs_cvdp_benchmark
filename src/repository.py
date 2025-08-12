@@ -73,6 +73,74 @@ def apply_template_substitution(content: str) -> str:
     
     return content
 
+
+def add_license_network_to_docker_compose(content: str, license_network_name: str) -> str:
+    """
+    Add or update license network configuration in Docker Compose YAML content.
+    
+    This function ensures that commercial EDA datapoints have the correct license
+    network configuration, handling both hardcoded 'licnetwork' references and
+    adding the license network as an additional external network.
+    
+    Args:
+        content: Docker Compose YAML content as string
+        license_network_name: Name of the license network to add/configure
+        
+    Returns:
+        Updated Docker Compose YAML content as string
+    """
+    import yaml
+    
+    try:
+        # Parse the YAML content
+        data = yaml.safe_load(content)
+        
+        # If the file is empty or invalid, skip processing
+        if not data or 'services' not in data:
+            return content
+        
+        # Ensure networks section exists
+        if 'networks' not in data:
+            data['networks'] = {}
+        
+        # Add/update the license network configuration
+        # Replace any existing 'licnetwork' with the configured name
+        if 'licnetwork' in data['networks'] and license_network_name != 'licnetwork':
+            # Move licnetwork config to the new name
+            data['networks'][license_network_name] = data['networks'].pop('licnetwork')
+        
+        # Ensure license network is configured as external
+        if license_network_name not in data['networks']:
+            data['networks'][license_network_name] = {}
+        
+        data['networks'][license_network_name].update({
+            'name': license_network_name,
+            'external': True
+        })
+        
+        # Update service network references
+        for service_name, service_config in data['services'].items():
+            if 'networks' in service_config:
+                # Replace 'licnetwork' references in service networks
+                if isinstance(service_config['networks'], list):
+                    # Handle list format: [default, licnetwork]
+                    networks = service_config['networks']
+                    for i, network in enumerate(networks):
+                        if network == 'licnetwork' and license_network_name != 'licnetwork':
+                            networks[i] = license_network_name
+                elif isinstance(service_config['networks'], dict):
+                    # Handle dict format: {default: {}, licnetwork: {}}
+                    if 'licnetwork' in service_config['networks'] and license_network_name != 'licnetwork':
+                        service_config['networks'][license_network_name] = service_config['networks'].pop('licnetwork')
+        
+        # Convert back to YAML string
+        return yaml.dump(data, default_flow_style=False)
+        
+    except Exception as e:
+        # If YAML parsing fails, return original content
+        print(f"Warning: Failed to process license network in YAML: {e}")
+        return content
+
 class Repository:
 
     def __init__(self,
@@ -83,7 +151,10 @@ class Repository:
             patches      = list[str],
             debug        = False,
             host         = False,
-            sbj_llm_model    = None
+            sbj_llm_model    = None,
+            network_name = None,
+            manage_network = True,
+            requires_eda_license = False
         ):
 
         self.name         = repo
@@ -96,9 +167,10 @@ class Repository:
         self.host         = host
         self.debug        = debug
         self.sbj_llm_model    = sbj_llm_model  # Added LLM model parameter
+        self.requires_eda_license = requires_eda_license  # Flag indicating if this datapoint requires EDA license network
         # Network info
-        self.network_name = None
-        self.manage_network = True  # Default to managing network in this process
+        self.network_name = network_name
+        self.manage_network = manage_network
         # Directory size monitor
         self.dir_monitor = DirectorySizeMonitor()
 
@@ -154,6 +226,12 @@ class Repository:
 
             # Apply centralized template substitution for EDA infrastructure
             content = apply_template_substitution(content)
+            
+            # Add license network configuration for commercial EDA datapoints
+            if self.requires_eda_license and file.endswith('docker-compose.yml'):
+                license_network_name = config.get('LICENSE_NETWORK')
+                if license_network_name:
+                    content = add_license_network_to_docker_compose(content, license_network_name)
                            
             # Filter out rundir volumes from docker-compose.yml
             if file.endswith('docker-compose.yml'):
@@ -177,11 +255,10 @@ class Repository:
                                 service_config['volumes'] = filtered_volumes
                                 
                         # Add network configuration if not already present
-                        network_name = self.network_name or config.get('LICENSE_NETWORK')
-                        if network_name and 'networks' not in data:
+                        if self.network_name and 'networks' not in data:
                             data['networks'] = {
                                 'default': {
-                                    'name': network_name,
+                                    'name': self.network_name,
                                     'external': True
                                 }
                             }
@@ -419,6 +496,199 @@ class Repository:
                 pass
         
         return result
+
+    def create_workspace_volume_script(self, docker_dir, repo_url=None, commit_hash=None, patches=None, root_dir=None):
+        """
+        Creates create_workspace_volume.sh and destroy_workspace_volume.sh scripts for context heavy datapoints.
+        These scripts leverage existing git cache mirrors and use the same approach as GitRepositoryManager.
+        
+        Args:
+            docker_dir (str): Directory where the scripts will be created
+            repo_url (str): Git repository URL
+            commit_hash (str): Commit hash to checkout
+            patches (dict): Optional patches to apply
+            root_dir (str): Optional subdirectory to extract (e.g., "external")
+        """
+        volume_name = self.volume_name or f"{self.id}_workspace"
+        
+        # Create the create_workspace_volume.sh script
+        create_script_path = os.path.join(docker_dir, 'create_workspace_volume.sh')
+        with open(create_script_path, 'w') as script_file:
+            script_file.write("#!/bin/bash\n")
+            script_file.write("# Auto-generated script to create workspace volume for context heavy datapoint\n")
+            script_file.write(f"# Datapoint ID: {self.id}\n")
+            script_file.write(f"# Volume name: {volume_name}\n")
+            script_file.write(f"# Repository: {repo_url}\n")
+            script_file.write(f"# Commit: {commit_hash}\n\n")
+            
+            script_file.write("set -e\n\n")
+            
+            script_file.write("echo \"Creating workspace volume for context heavy datapoint...\"\n")
+            script_file.write(f"echo \"Volume name: {volume_name}\"\n")
+            if repo_url:
+                script_file.write(f"echo \"Repository: {repo_url}\"\n")
+            if commit_hash:
+                script_file.write(f"echo \"Commit: {commit_hash}\"\n")
+            script_file.write("\n")
+            
+            # Check if volume already exists
+            script_file.write("# Check if volume already exists\n")
+            script_file.write(f"if docker volume inspect {volume_name} &>/dev/null; then\n")
+            script_file.write(f"  echo \"Volume {volume_name} already exists. Removing it first...\"\n")
+            script_file.write(f"  docker volume rm -f {volume_name}\n")
+            script_file.write("fi\n\n")
+            
+            # Create the volume
+            script_file.write("# Create Docker volume\n")
+            script_file.write(f"echo \"Creating Docker volume: {volume_name}\"\n")
+            script_file.write(f"docker volume create {volume_name}\n\n")
+            
+            if repo_url and commit_hash:
+                # Find existing git cache mirror
+                script_file.write("# Look for existing git cache mirror\n")
+                script_file.write("SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n")
+                script_file.write("WORK_DIR=\"$(dirname \"$(dirname \"$(dirname \"$SCRIPT_DIR\")\")\")\"  # Go up to work directory\n")
+                script_file.write("GIT_CACHE_DIR=\"$WORK_DIR/git_cache/mirrors\"\n")
+                script_file.write("MIRROR_DIR=\"\"\n\n")
+                
+                script_file.write("# Find the mirror directory (should be named with repo hash)\n")
+                script_file.write("if [ -d \"$GIT_CACHE_DIR\" ]; then\n")
+                script_file.write("  for mirror in \"$GIT_CACHE_DIR\"/*.git; do\n")
+                script_file.write("    if [ -d \"$mirror\" ]; then\n")
+                script_file.write("      MIRROR_DIR=\"$mirror\"\n")
+                script_file.write("      echo \"Found git cache mirror: $MIRROR_DIR\"\n")
+                script_file.write("      break\n")
+                script_file.write("    fi\n")
+                script_file.write("  done\n")
+                script_file.write("fi\n\n")
+                
+                script_file.write("if [ -z \"$MIRROR_DIR\" ]; then\n")
+                script_file.write("  echo \"ERROR: No git cache mirror found in $GIT_CACHE_DIR\"\n")
+                script_file.write("  echo \"Please run the benchmark with -l -g first to create the git cache.\"\n")
+                script_file.write("  exit 1\n")
+                script_file.write("fi\n\n")
+                
+                # Ensure patch_image exists
+                script_file.write("# Ensure patch_image Docker image exists\n")
+                script_file.write("if ! docker image inspect patch_image &>/dev/null; then\n")
+                script_file.write("  echo \"Building patch_image Docker image...\"\n")
+                script_file.write("  TEMP_DOCKERFILE=$(mktemp)\n")
+                script_file.write("  cat > \"$TEMP_DOCKERFILE\" << 'EOF'\n")
+                script_file.write("FROM ubuntu:22.04\n")
+                script_file.write("RUN apt update && apt install -y git\n")
+                script_file.write("EOF\n")
+                script_file.write("  docker build -t patch_image -f \"$TEMP_DOCKERFILE\" .\n")
+                script_file.write("  rm \"$TEMP_DOCKERFILE\"\n")
+                script_file.write("fi\n\n")
+                
+                # Create temporary directory for patches
+                script_file.write("# Create temporary directory for patches\n")
+                script_file.write("PATCH_DIR=$(mktemp -d)\n")
+                script_file.write("cleanup() {\n")
+                script_file.write("  rm -rf \"$PATCH_DIR\"\n")
+                script_file.write("}\n")
+                script_file.write("trap cleanup EXIT\n\n")
+                
+                # Create patch files using the same format as GitRepositoryManager
+                script_file.write("# Create patch.diff file (same format as GitRepositoryManager)\n")
+                script_file.write("cat > \"$PATCH_DIR/patch.diff\" << 'PATCH_EOF'\n")
+                if patches:
+                    for file_path, patch_body in patches.items():
+                        # Use same format as GitRepositoryManager: add proper headers
+                        filename = f"{root_dir}/{file_path}" if root_dir else file_path
+                        script_file.write(f"--- a/{filename}\n")
+                        script_file.write(f"+++ b/{filename}\n")
+                        script_file.write(patch_body)
+                        script_file.write("\n\n")
+                script_file.write("PATCH_EOF\n\n")
+                
+                # Create safe patch application script (same as GitRepositoryManager)
+                script_file.write("# Create safe patch application script\n")
+                script_file.write("cat > \"$PATCH_DIR/safe-apply.sh\" << 'SCRIPT_EOF'\n")
+                script_file.write("#!/bin/bash\n")
+                script_file.write("PATCH=\"$1\"\n")
+                script_file.write("if [ -s \"$PATCH\" ]; then\n")
+                script_file.write("	git apply -v \"$PATCH\"\n")
+                script_file.write("else\n")
+                script_file.write("	echo \"Patch is empty, skipping apply.\"\n")
+                script_file.write("fi\n")
+                script_file.write("SCRIPT_EOF\n")
+                script_file.write("chmod +x \"$PATCH_DIR/safe-apply.sh\"\n\n")
+                
+                # Setup git repository in volume using mirror
+                script_file.write("# Setup git repository in volume using existing mirror\n")
+                script_file.write("echo \"Setting up workspace from git mirror...\"\n")
+                script_file.write("USER_ID=$(id -u)\n")
+                script_file.write("GROUP_ID=$(id -g)\n")
+                script_file.write("docker run --rm \\\n")
+                script_file.write("  -v \"$MIRROR_DIR:/repo:ro\" \\\n")
+                script_file.write("  -v \"$PATCH_DIR:/patch:ro\" \\\n")
+                script_file.write(f"  -v {volume_name}:/workspace \\\n")
+                script_file.write("  patch_image bash -c '\n")
+                script_file.write("    set -ex\n")
+                script_file.write("    mkdir /rundir && cd /rundir\n")
+                script_file.write("    git config --global --add safe.directory /repo\n")
+                script_file.write("    git init\n")
+                script_file.write("    git remote add origin /repo\n")
+                script_file.write(f"    git fetch --depth 1 origin {commit_hash}\n")
+                script_file.write(f"    git checkout {commit_hash}\n")
+                script_file.write("    bash /patch/safe-apply.sh /patch/patch.diff\n")
+                
+                # Copy to workspace (same approach as GitRepositoryManager)
+                root = f"{root_dir}/." if root_dir else "."
+                script_file.write(f"    cp -a ./{root} /workspace/\n")
+                script_file.write("    echo \"Workspace setup complete\"\n")
+                script_file.write("'\n\n")
+                
+                # Fix volume ownership to current user
+                script_file.write("# Fix volume ownership to current user\n")
+                script_file.write("echo \"Fixing volume ownership...\"\n")
+                script_file.write("docker run --rm \\\n")
+                script_file.write(f"  -v {volume_name}:/workspace \\\n")
+                script_file.write("  ubuntu:22.04 \\\n")
+                script_file.write("  chown -R \"$USER_ID:$GROUP_ID\" /workspace\n\n")
+            
+            script_file.write("echo \"Workspace volume creation complete!\"\n")
+            script_file.write(f"echo \"Volume {volume_name} is ready for use.\"\n")
+            script_file.write("echo \"You can now run the agent and harness scripts.\"\n")
+        
+        # Make create script executable
+        os.chmod(create_script_path, 0o755)
+        
+        # Create the destroy_workspace_volume.sh script
+        destroy_script_path = os.path.join(docker_dir, 'destroy_workspace_volume.sh')
+        with open(destroy_script_path, 'w') as script_file:
+            script_file.write("#!/bin/bash\n")
+            script_file.write("# Auto-generated script to destroy workspace volume for context heavy datapoint\n")
+            script_file.write(f"# Datapoint ID: {self.id}\n")
+            script_file.write(f"# Volume name: {volume_name}\n\n")
+            
+            script_file.write("set -e\n\n")
+            
+            script_file.write("echo \"Destroying workspace volume for context heavy datapoint...\"\n")
+            script_file.write(f"echo \"Volume name: {volume_name}\"\n\n")
+            
+            # Check if volume exists
+            script_file.write("# Check if volume exists\n")
+            script_file.write(f"if ! docker volume inspect {volume_name} &>/dev/null; then\n")
+            script_file.write(f"  echo \"Volume {volume_name} does not exist. Nothing to destroy.\"\n")
+            script_file.write("  exit 0\n")
+            script_file.write("fi\n\n")
+            
+            # Remove the volume
+            script_file.write("# Remove Docker volume\n")
+            script_file.write(f"echo \"Removing Docker volume: {volume_name}\"\n")
+            script_file.write(f"docker volume rm -f {volume_name}\n\n")
+            
+            script_file.write("echo \"Workspace volume destruction complete!\"\n")
+            script_file.write(f"echo \"Volume {volume_name} has been removed.\"\n")
+        
+        # Make destroy script executable
+        os.chmod(destroy_script_path, 0o755)
+        
+        print(f"[INFO] Created workspace volume scripts:")
+        print(f"[INFO]   Create: {create_script_path}")
+        print(f"[INFO]   Destroy: {destroy_script_path}")
 
     def create_agent_script(self, docker_compose_path, agent_image=None):
         """
@@ -768,3 +1038,99 @@ class Repository:
             raise Exception(e)
 
         return (results, error)
+
+    def clean_up(self):
+        pass
+
+class AgenticRepository(Repository):
+    """
+    A subclass of Repository that handles agentic evaluation.
+    """
+
+    def __init__(self,
+            repo         = str,
+            id           = int,
+            context      = list[list[dict()]],
+            harness      = list[list[dict()]],
+            patches      = list[str],
+            debug        = False,
+            host         = False,
+            network_name = None,
+            manage_network = True,
+            requires_eda_license = False
+        ):
+
+        super().__init__(repo, id, context, harness, patches, debug, host, network_name=network_name, manage_network=manage_network, requires_eda_license=requires_eda_license)
+        self.volume_name = None
+
+    def prepare(self):
+
+        self.issue_path = os.path.join(f"{self.name}", "harness", f"{self.id}")
+        self.report_path = os.path.join(f"{self.name}", "reports")
+
+        self.create_issue_dirs(self.issue_path)
+        
+        # For agentic heavy datapoints, restore minimal context (e.g., prompt.json)
+        if self.context:
+            self.restore_files(self.context)
+
+        if self.harness:
+            self.restore_files(self.harness)
+
+        self.logfile = os.path.abspath(os.path.join(self.report_path, f"{self.id}"))
+    
+    # ----------------------------------------
+    # - Docker Command Line
+    # ----------------------------------------
+
+    def docker_cmd(self, issue_path):
+
+        cwd  = os.getcwd()
+        key  = os.getenv('OPENAI_USER_KEY')
+        path = os.path.abspath(issue_path)
+
+        if self.volume_name:
+
+            # Mount only external/ into /code
+            volumes = [f'-v {self.volume_name}:/code']
+            volumes.extend([f'-v "{path}/src:/src"'])
+            volumes.extend([f'-v "{path}/rundir:/rundir"'])
+            volumes.extend([f'-v "{cwd}/llm_lib:/pysubj"'])
+
+        else:
+            raise ValueError("Unable to identify volume name for datapoint execution.")
+
+        cmd     = " ".join(volumes)
+        cmd    += f" --rm -w /rundir"
+
+        # Adding OpenAI Key to the command line
+        if key:
+            cmd += f" --env OPENAI_USER_KEY={key}"
+        return cmd
+
+    def create_folders(self, path):
+
+        self.safely_create_dir(f"{path}")
+        self.safely_create_dir(f"{path}/external")
+        self.safely_create_dir(f"{path}/rundir")
+    
+    def clean_up(self):
+        """
+        Clean up resources used by this repository, including Docker volumes.
+        """
+        if self.volume_name:
+            try:
+                print(f"[INFO] Cleaning up workspace volume: {self.volume_name}")
+                import subprocess
+                subprocess.run(
+                    ["docker", "volume", "rm", "-f", self.volume_name],
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+            except Exception as e:
+                print(f"[WARNING] Failed to cleanup workspace volume {self.volume_name}: {e}")
+        
+        # Call parent cleanup if it exists
+        if hasattr(super(), 'clean_up'):
+            super().clean_up()

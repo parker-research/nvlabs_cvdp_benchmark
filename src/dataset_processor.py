@@ -23,6 +23,7 @@ import subprocess
 import yaml
 from . import network_util
 from .dir_monitor import DirectorySizeMonitor
+from . import git_utils
 import psutil
 import sys
 # Load environment variables from .env file
@@ -122,7 +123,7 @@ class DatasetProcessor():
     # - Constructor
     # ----------------------------------------
 
-    def __init__(self, filename : str, golden : bool = True, threads : int = 1, debug = False, host = False, prefix : str = None):
+    def __init__(self, filename : str, golden : bool = True, threads : int = 1, debug = False, host = False, prefix : str = None, network_name = None, manage_network = True):
         # Initialize the model
         self.model   = None
         self.context = {}
@@ -135,8 +136,8 @@ class DatasetProcessor():
         self.disable_patch = False  # Default: patches are applied in golden mode
 
         # Network settings
-        self.network_name = None
-        self.manage_network = True
+        self.network_name = network_name
+        self.manage_network = manage_network
 
         # Centralized subjective scoring model management
         self._model_factory = ModelFactory()
@@ -433,12 +434,14 @@ When generating files, return the file name in the correct place at the folder s
         return (harness, name, issue, patches)
 
     def create_repository (self, id : str, harness : {} = None, name : str = "", issue : str = "", patches : {} = None):
-        repo = repository.Repository(name, issue, self.files [id], harness['files'] if harness and 'files' in harness else harness, patches, host=self.host, sbj_llm_model=self.sbj_llm_model)
+        # Determine if this specific datapoint requires EDA license network
+        from src import commercial_eda
+        datapoint = self.context.get(id, {})
+        requires_eda_license = commercial_eda.datapoint_requires_eda_license(datapoint)
         
-        # Pass network configuration
-        if hasattr(self, 'network_name') and self.network_name:
-            repo.network_name = self.network_name
-            repo.manage_network = self.manage_network
+        repo = repository.Repository(name, issue, self.files [id], harness['files'] if harness and 'files' in harness else harness, patches, host=self.host, sbj_llm_model=self.sbj_llm_model, network_name=getattr(self, 'network_name', None), manage_network=getattr(self, 'manage_network', True), requires_eda_license=requires_eda_license)
+        
+        # Network configuration is now passed during construction, no need to set it after
         
         return (harness != None and harness != {}, repo)
 
@@ -822,7 +825,7 @@ When generating files, return the file name in the correct place at the folder s
 
             (_, obj, repo) = self.prepare(issue = id, model = model)
 
-            output = self.files [id]
+            output = self.files.get(id, {})
             diff   = dict(set(output.items()) ^ set(input.items()))
 
             self.runs [id] = {
@@ -990,9 +993,6 @@ When generating files, return the file name in the correct place at the folder s
 
         cat = int(self.context[id]['categories'][0][3:])
 
-        # Configure network settings
-        self.configure_repo_network(repo, id)
-
         # Check if this is a subjective category
         if cat in CODE_COMPREHENSION_CATEGORIES:
             # Run subjective scoring for any mode - the method handles golden vs non-golden internally
@@ -1010,28 +1010,6 @@ When generating files, return the file name in the correct place at the folder s
 
         return result
 
-    def configure_repo_network(self, repo, id):
-        """
-        Configure network settings.
-        """
-        # Make sure repo has network settings if we have them
-        if repo and hasattr(self, 'network_name') and self.network_name:
-            if not hasattr(repo, 'network_name') or not repo.network_name:
-                print(f"Setting network_name on Repository instance for id {id}")
-                repo.network_name = self.network_name
-                repo.manage_network = self.manage_network
-                
-                # If the repo has already been prepared, update its docker-compose files
-                if repo.issue_path:
-                    docker_compose_path = os.path.join(repo.issue_path, "docker-compose.yml")
-                    if os.path.exists(docker_compose_path):
-                        print(f"Updating {docker_compose_path} with network configuration")
-                        network_util.add_network_to_docker_compose(docker_compose_path, self.network_name)
-                    
-                    docker_compose_agent_path = os.path.join(repo.issue_path, "docker-compose-agent.yml")
-                    if os.path.exists(docker_compose_agent_path):
-                        print(f"Updating {docker_compose_agent_path} with network configuration")
-                        network_util.add_network_to_docker_compose(docker_compose_agent_path, self.network_name)
 
     def all_run(self, model : OpenAI_Instance = None):
         from .parallel_executor import ParallelExecutor
@@ -1066,10 +1044,8 @@ When generating files, return the file name in the correct place at the folder s
         return result
 
 class CopilotProcessor (DatasetProcessor):
-    def __init__(self, filename : str = "", golden : bool = True, threads : int = 1, debug = False, host = False, prefix : str = None, network=None, include_golden_patch=False, include_harness=False, refine_model=None):
-        super().__init__(filename, golden, threads, debug, host, prefix)
-        self.network_name = network
-        self.manage_network = True
+    def __init__(self, filename : str = "", golden : bool = True, threads : int = 1, debug = False, host = False, prefix : str = None, network_name=None, manage_network=True, include_golden_patch=False, include_harness=False, refine_model=None):
+        super().__init__(filename, golden, threads, debug, host, prefix, network_name, manage_network)
         self.include_golden_patch = include_golden_patch
         self.include_harness = include_harness
         self.refined_datapoints = {}
@@ -1440,14 +1416,37 @@ class AgenticProcessor (DatasetProcessor):
     # - Process JSON File
     # ----------------------------------------
 
-    def __init__(self, filename : str, golden : bool = True, threads : int = 1, debug = False, host = False, prefix : str = None):
-        super().__init__(filename, golden, threads, debug, host, prefix)
+    def __init__(self, filename : str, golden : bool = True, threads : int = 1, debug = False, host = False, prefix : str = None, network_name=None, manage_network=True):
+        super().__init__(filename, golden, threads, debug, host, prefix, network_name, manage_network)
         self.agent_results = {}
         # Directory size monitor
         self.dir_monitor = DirectorySizeMonitor()
         # Initialize include flags to False by default
         self.include_golden_patch = False
         self.include_harness = False
+
+        # Ensure patch_image Docker image exists for agentic heavy processing
+        result = subprocess.run(["docker", "images", "-q", "patch_image"],
+                                capture_output=True,
+                                text=True
+        )
+
+        if not result.stdout.strip():
+
+            # Ensure prefix directory exists
+            os.makedirs(self.prefix, exist_ok=True)
+            dockerfile = os.path.join(self.prefix, "Dockerfile.patch_image")
+
+            print(f"[INFO] Docker image 'patch_image' not found, building it...")
+            with open(dockerfile, "w") as f:
+                f.write("FROM ubuntu:22.04\nRUN apt update && apt install -y git")
+
+            # Build image
+            subprocess.run(["docker", "build", "-t", "patch_image", "-f", dockerfile, "."],
+                            check=True)
+
+        else:
+            print(f"[INFO] Docker image 'patch_image' already exists...")
 
     # ----------------------------------------
     # - Process JSON File
@@ -1464,6 +1463,27 @@ class AgenticProcessor (DatasetProcessor):
         Override to access context directly instead of from 'input.context'.
         """
         return context['context']
+
+    def create_repository (self, id : str, harness = None, name : str = "", issue : str = "", patches = None):
+        # Determine if this specific datapoint requires EDA license network
+        from src import commercial_eda
+        datapoint = self.context.get(id, {})
+        requires_eda_license = commercial_eda.datapoint_requires_eda_license(datapoint)
+
+        if 'cvdp_agentic_heavy' in id:
+            # For agentic heavy datapoints, create minimal context with just prompt.json
+            # This avoids the space overhead of full context restoration while still providing the prompt
+            import json
+            minimal_context = {
+                'prompt.json': json.dumps({"prompt": self.context[id]['prompt']})
+            }
+            repo = repository.AgenticRepository(name, issue, minimal_context, harness, patches, host=self.host, network_name=getattr(self, 'network_name', None), manage_network=getattr(self, 'manage_network', True), requires_eda_license=requires_eda_license)
+        else:
+            repo = repository.Repository(name, issue, self.files [id], harness, patches, host=self.host, network_name=getattr(self, 'network_name', None), manage_network=getattr(self, 'manage_network', True), requires_eda_license=requires_eda_license)
+        
+        # Network configuration is now passed during construction, no need to set it after
+        
+        return (True, repo)
 
     def create_context (self, id : str, model : OpenAI_Instance = None):
 
@@ -1516,26 +1536,101 @@ class AgenticProcessor (DatasetProcessor):
                         f.write(patch_content)
                         f.write("\n\n")
         
+        # Check if this is a context-heavy datapoint that needs git repository handling
+        issue_id = os.path.basename(issue_path)
+        data_id = None
+        for id in self.context:
+            if str(issue_id) in id:
+                data_id = id
+                break
+        
+        use_git_workspace = False
+        workspace_volume = None
+        
+        # Determine if we should use git-based workspace
+        if data_id:
+            # Check for context-heavy ID pattern
+            is_context_heavy = 'agentic_heavy' in data_id
+            
+            # Check for repo info in CLI args or datapoint context
+            repo_url = getattr(self, 'repo_url', None)
+            commit_hash = getattr(self, 'commit_hash', None)
+            context_data = self.context[data_id].get('context', {})
+            
+            # CLI args take precedence over datapoint context
+            if not repo_url and 'repo' in context_data:
+                repo_url = context_data['repo']
+            if not commit_hash and 'commit' in context_data:
+                commit_hash = context_data['commit']
+            
+            # Check if this is a context-heavy datapoint
+            # The git workspace will be created by the repository's create_repo method
+            if (repo_url and commit_hash) or is_context_heavy:
+                use_git_workspace = True
+                print(f"[INFO] Detected context-heavy datapoint: {data_id}")
+                
+                # For context heavy datapoints, determine the workspace volume name
+                # This should match the volume naming in create_repo
+                if is_context_heavy and (repo_url and commit_hash):
+                    workspace_volume = f"{data_id}_workspace"
+                    print(f"[INFO] Using workspace volume: {workspace_volume}")
+                else:
+                    # Try to get from existing repository if available
+                    for _, data in self.runs.items():
+                        if 'repo' in data and data['repo'] is not None:
+                            if hasattr(data['repo'], 'issue_path') and data['repo'].issue_path == issue_path:
+                                if hasattr(data['repo'], 'volume_name') and data['repo'].volume_name:
+                                    workspace_volume = data['repo'].volume_name
+                                    break
+        
         # Create docker-compose configuration for the agent
-        docker_compose = {
-            'version': '3',
-            'services': {
-                'agent': {
-                    'image': agent,
-                    'volumes': [
-                        './docs:/code/docs',
-                        './rtl:/code/rtl',
-                        './verif:/code/verif',
-                        './rundir:/code/rundir',
-                        './prompt.json:/code/prompt.json'
-                    ],
-                    'working_dir': '/code',
-                    'environment': {
-                        'OPENAI_USER_KEY': config.get('OPENAI_USER_KEY', '')
+        if use_git_workspace and workspace_volume:
+            # Use volume-based mounting for git workspaces
+            docker_compose = {
+                'version': '3',
+                'services': {
+                    'agent': {
+                        'image': agent,
+                        'volumes': [
+                            f'{workspace_volume}:/code',
+                            './prompt.json:/code/prompt.json',
+                            './rundir:/code/rundir'
+                        ],
+                        'working_dir': '/code',
+                        'environment': {
+                            'OPENAI_USER_KEY': config.get('OPENAI_USER_KEY', '')
+                        }
+                    }
+                },
+                'volumes': {
+                    workspace_volume: {
+                        'external': True,
+                        'name': workspace_volume
                     }
                 }
             }
-        }
+        else:
+            # Use traditional directory-based mounting
+            docker_compose = {
+                'version': '3',
+                'services': {
+                    'agent': {
+                        'image': agent,
+                        'volumes': [
+                            './docs:/code/docs',
+                            './rtl:/code/rtl',
+                            './verif:/code/verif',
+                            './rundir:/code/rundir',
+                            './prompt.json:/code/prompt.json'
+                        ],
+                        'working_dir': '/code',
+                        'environment': {
+                            'OPENAI_USER_KEY': config.get('OPENAI_USER_KEY', '')
+                        }
+                    }
+                }
+            }
+            print("[INFO] Using traditional directory-based mounting")
         
         # Add golden patch to volumes if it exists
         if hasattr(self, 'include_golden_patch') and self.include_golden_patch:
@@ -1572,9 +1667,47 @@ class AgenticProcessor (DatasetProcessor):
             # Ensure agent service uses the network
             docker_compose['services']['agent']['networks'] = ['default']
         
+        # Add license network configuration for commercial EDA datapoints
+        if data_id:
+            from src import commercial_eda
+            datapoint = self.context.get(data_id, {})
+            if commercial_eda.datapoint_requires_eda_license(datapoint):
+                license_network_name = config.get('LICENSE_NETWORK')
+                if license_network_name:
+                    # Ensure networks section exists
+                    if 'networks' not in docker_compose:
+                        docker_compose['networks'] = {}
+                    
+                    # Add the license network
+                    docker_compose['networks'][license_network_name] = {
+                        'name': license_network_name,
+                        'external': True
+                    }
+                    
+                    # Add license network to agent service networks
+                    if 'networks' not in docker_compose['services']['agent']:
+                        docker_compose['services']['agent']['networks'] = []
+                    elif isinstance(docker_compose['services']['agent']['networks'], list):
+                        # Networks is already a list, append to it
+                        pass
+                    else:
+                        # Networks might be in dict format, convert to list
+                        docker_compose['services']['agent']['networks'] = ['default']
+                    
+                    # Add license network to the list if not already present
+                    if license_network_name not in docker_compose['services']['agent']['networks']:
+                        docker_compose['services']['agent']['networks'].append(license_network_name)
+                    
+                    print(f"Added license network '{license_network_name}' to agent Docker Compose for commercial EDA datapoint")
+        
         # Write the Docker Compose file
         with open(docker_compose_path, 'w') as f:
             yaml.dump(docker_compose, f, default_flow_style=False)
+        
+        # Create before snapshot volume for git workspace volumes (for change detection)
+        before_volume = None
+        if use_git_workspace and workspace_volume:
+            before_volume = self._create_before_snapshot_volume(workspace_volume, issue_path)
         
         print(f"Running agent inside {issue_path}...")
         
@@ -1591,9 +1724,6 @@ class AgenticProcessor (DatasetProcessor):
         if not formatted_repo[0].isalnum():
             formatted_repo = 'p' + formatted_repo
         
-        # Create project name with formatted repo name
-        project_name = f"agent_{formatted_repo}_{issue_id}_{int(time.time())}"
-        
         # Find repository instance if it exists for this issue path
         repo_instance = None
         for _, data in self.runs.items():
@@ -1601,6 +1731,12 @@ class AgenticProcessor (DatasetProcessor):
                 if data['repo'].issue_path == issue_path:
                     repo_instance = data['repo']
                     break
+        
+        # Workspace volume should already be set above if available
+        
+        # Create project name with formatted repo name
+        # Use simple naming convention consistent with volume naming
+        project_name = f"agent_{formatted_repo}_{issue_id}_{int(time.time())}"
         
         # Create/ensure reports directory exists
         if repo_instance is not None:
@@ -1670,9 +1806,8 @@ class AgenticProcessor (DatasetProcessor):
                     subprocess.run(kill_cmd, shell=True)
                     returncode = 1  # Non-zero return code indicating failure
             
-            # We shouldn't need this anymore, but keep as a safety measure
-            # with error output suppressed to avoid the "network not found" messages
-            # Only clean up if we're not using a shared network or if we're managing our own network
+            # Legacy network cleanup - only runs if no shared network is configured
+            # Since we now always use shared networks, this cleanup is effectively disabled
             if (not hasattr(self, 'network_name') or not self.network_name) and (not hasattr(self, 'manage_network') or self.manage_network):
                 try:
                     # Extract project name prefix for filtering (remove timestamp)
@@ -1683,6 +1818,23 @@ class AgenticProcessor (DatasetProcessor):
                 except Exception:
                     # Suppress even the Python exception messages
                     pass
+            
+            # Generate agent_changes.patch directly from git workspace volume
+            if use_git_workspace and workspace_volume and before_volume:
+                try:
+                    self._generate_volume_changes_patch(workspace_volume, before_volume, issue_path)
+                except Exception as e:
+                    print(f"[WARNING] Failed to generate volume changes patch: {e}")
+                finally:
+                    # Clean up the before snapshot volume
+                    try:
+                        subprocess.run(["docker", "volume", "rm", "-f", before_volume], 
+                                     check=False, capture_output=True)
+                    except Exception as cleanup_e:
+                        print(f"[WARNING] Failed to cleanup before volume {before_volume}: {cleanup_e}")
+            
+            # Note: Git workspace volume cleanup is handled by the repository's cleanup method
+            # to ensure it persists for both harness and agent execution
             
             return returncode, logfile
         except Exception as e:
@@ -1695,8 +1847,8 @@ class AgenticProcessor (DatasetProcessor):
             except Exception:
                 pass
             
-            # Try to clean up the network even if the main command failed
-            # Only clean up if we're not using a shared network or if we're managing our own network
+            # Legacy network cleanup in exception handler - only runs if no shared network is configured
+            # Since we now always use shared networks, this cleanup is effectively disabled
             if (not hasattr(self, 'network_name') or not self.network_name) and (not hasattr(self, 'manage_network') or self.manage_network):
                 try:
                     # Extract project name prefix for filtering (remove timestamp)
@@ -1707,6 +1859,8 @@ class AgenticProcessor (DatasetProcessor):
                 except Exception:
                     # Completely suppress errors from cleanup
                     pass
+            
+            # Note: Git workspace volume cleanup is handled by the repository's cleanup method
             
             return 1, logfile
 
@@ -1811,16 +1965,6 @@ class AgenticProcessor (DatasetProcessor):
         
         print(f"Created agent script: {script_path}")
 
-    def create_repository (self, id : str, harness : {} = None, name : str = "", issue : str = "", patches : {} = None):
-        repo = repository.Repository(name, issue, self.files [id], harness['files'] if harness and 'files' in harness else harness, patches, host=self.host, sbj_llm_model=self.sbj_llm_model)
-        
-        # Pass network configuration
-        if hasattr(self, 'network_name') and self.network_name:
-            repo.network_name = self.network_name
-            repo.manage_network = self.manage_network
-        
-        return (harness != None and harness != {}, repo)
-    
     def th_agent(self, id):
         """
         Process an ID through the agent, similar to th_prepare and th_run.
@@ -1843,110 +1987,133 @@ class AgenticProcessor (DatasetProcessor):
             
             result = context.copy()
             
-            # Prepare directories for agent
-            dir_names = ["docs", "rundir", "rtl", "verif"]
-            before_dir = os.path.join(issue_path, "before")
-            os.makedirs(before_dir, exist_ok=True)
-            for d in dir_names:
-                src = os.path.join(issue_path, d)
-                bak = os.path.join(before_dir, d)
-                os.makedirs(src, exist_ok=True)
-                if os.path.exists(bak): shutil.rmtree(bak)
-                shutil.copytree(src, bak)
+            # Check if this is a context-heavy datapoint that uses git workspace volumes
+            has_agentic_heavy = 'agentic_heavy' in id
+            context_data = self.context[id].get('context', {})
+            repo_url = context_data.get('repo')
+            commit_hash = context_data.get('commit')
+            is_context_heavy = (has_agentic_heavy and bool(repo_url) and bool(commit_hash))
             
-            if not self.golden:
-                # Run agent
-                agent_status, agent_logfile = self.agent_run(issue_path, self.agent)
+            if is_context_heavy:
                 
-                # Store agent log file info
-                result['agent_logfile'] = agent_logfile
-                
-                if agent_status != 0:
-                    error_msg = f"Agent process exited with non-zero status: {agent_status}"
-                    logging.error(error_msg)
-                    # Store error but also continue to process any files that might have been created
-                    result['agent_error'] = error_msg
-                
-                # Clean up any stray Docker resources (with error suppression)
-                try:
-                    # Extract issue ID and repo name for project name pattern
-                    issue_id_str = str(issue_id)
-                    harness_dir = os.path.dirname(issue_path)
-                    repo_name_base = os.path.basename(os.path.dirname(harness_dir))
+                if not self.golden:
+                    # For context-heavy datapoints, just run the agent - volume-based patch generation
+                    # is handled in agent_run method
+                    agent_status, agent_logfile = self.agent_run(issue_path, self.agent)
                     
-                    # Format repo_name to comply with Docker naming requirements
-                    formatted_repo = ''.join(c.lower() if c.isalnum() or c == '-' or c == '_' else '_' for c in repo_name_base)
-                    if not formatted_repo[0].isalnum():
-                        formatted_repo = 'p' + formatted_repo
+                    # Store agent log file info
+                    result['agent_logfile'] = agent_logfile
                     
-                    # Clean up any networks with similar pattern
-                    cleanup_cmd = f"docker network ls --filter name=agent_{formatted_repo}_{issue_id_str} -q | xargs -r docker network rm 2>/dev/null || true"
-                    subprocess.run(cleanup_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                except Exception:
-                    # Completely suppress errors from cleanup
-                    pass
+                    if agent_status != 0:
+                        error_msg = f"Agent process exited with non-zero status: {agent_status}"
+                        logging.error(error_msg)
+                        result['agent_error'] = error_msg
                 
-                # Process differences even if agent had errors, in case partial results were created
-                
-                # Track all changes in a single unified patch
-                unified_patch = []
-                
+            else:
+                # Traditional agent processing for non-context-heavy datapoints
+                # Prepare directories for agent
+                dir_names = ["docs", "rundir", "rtl", "verif"]
+                before_dir = os.path.join(issue_path, "before")
+                os.makedirs(before_dir, exist_ok=True)
                 for d in dir_names:
-                    orig_dir = os.path.join(before_dir, d)
-                    mod_dir = os.path.join(issue_path, d)
-                    orig_files = {f: os.path.join(orig_dir, f) for f in self._get_files(orig_dir)}
-                    mod_files = {f: os.path.join(mod_dir, f) for f in self._get_files(mod_dir)}
-                    
-                    # Handle added and modified files
-                    for rel_path, mod_path in mod_files.items():
-                        context_path = os.path.join(d, rel_path)
-                        try:
-                            with open(mod_path, 'r', encoding='utf-8', errors='replace') as f:
-                                mod_content = f.read()
-                            
-                            # Added or modified file
-                            if rel_path not in orig_files:
-                                # New file - use directly
-                                result[context_path] = mod_content
-                                # Add new file to unified patch
-                                unified_patch.append(f"--- /dev/null\n+++ b/{context_path}\n@@ -0,0 +1,{len(mod_content.splitlines())} @@")
-                                for line in mod_content.splitlines():
-                                    unified_patch.append(f"+{line}")
-                                unified_patch.append("")  # Empty line between files
-                            else:
-                                with open(orig_files[rel_path], 'r', encoding='utf-8', errors='replace') as f:
-                                    orig_content = f.read()
-                                if orig_content != mod_content:
-                                    # Add diff to unified patch
-                                    diff = self._diff(orig_content, mod_content, context_path)
-                                    unified_patch.append(diff)
-                                    unified_patch.append("")  # Empty line between files
-                                    # Use modified content directly
-                                    result[context_path] = mod_content
-                        except Exception as file_e:
-                            file_error = f"Error processing {mod_path}: {str(file_e)}"
-                            logging.error(file_error)
-                            # Store the file-specific error but continue processing other files
-                            result[f'file_error_{context_path}'] = file_error
-                    
-                    # Handle deleted files
-                    for rel_path, orig_path in orig_files.items():
-                        if rel_path not in mod_files:
-                            context_path = os.path.join(d, rel_path)
-                            with open(orig_path, 'r', encoding='utf-8', errors='replace') as f:
-                                orig_content = f.read()
-                            # Add deletion to unified patch
-                            unified_patch.append(f"--- a/{context_path}\n+++ /dev/null\n@@ -1,{len(orig_content.splitlines())} +0,0 @@")
-                            for line in orig_content.splitlines():
-                                unified_patch.append(f"-{line}")
-                            unified_patch.append("")  # Empty line between files
+                    src = os.path.join(issue_path, d)
+                    bak = os.path.join(before_dir, d)
+                    os.makedirs(src, exist_ok=True)
+                    if os.path.exists(bak): shutil.rmtree(bak)
+                    shutil.copytree(src, bak)
                 
-                # Write the unified patch file
-                if unified_patch:
-                    patch_file = os.path.join(issue_path, "agent_changes.patch")
-                    with open(patch_file, 'w', encoding='utf-8') as f:
-                        f.write('\n'.join(unified_patch))
-                    result['agent_patch_file'] = patch_file
+                if not self.golden:
+                    # Run agent
+                    agent_status, agent_logfile = self.agent_run(issue_path, self.agent)
+                
+                    # Store agent log file info
+                    result['agent_logfile'] = agent_logfile
+                    
+                    if agent_status != 0:
+                        error_msg = f"Agent process exited with non-zero status: {agent_status}"
+                        logging.error(error_msg)
+                        # Store error but also continue to process any files that might have been created
+                        result['agent_error'] = error_msg
+                    
+                    # Clean up any stray Docker resources (with error suppression)
+                    try:
+                        # Extract issue ID and repo name for project name pattern
+                        issue_id_str = str(issue_id)
+                        harness_dir = os.path.dirname(issue_path)
+                        repo_name_base = os.path.basename(os.path.dirname(harness_dir))
+                        
+                        # Format repo_name to comply with Docker naming requirements
+                        formatted_repo = ''.join(c.lower() if c.isalnum() or c == '-' or c == '_' else '_' for c in repo_name_base)
+                        if not formatted_repo[0].isalnum():
+                            formatted_repo = 'p' + formatted_repo
+                        
+                        # Clean up any networks with similar pattern
+                        cleanup_cmd = f"docker network ls --filter name=agent_{formatted_repo}_{issue_id_str} -q | xargs -r docker network rm 2>/dev/null || true"
+                        subprocess.run(cleanup_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    except Exception:
+                        # Completely suppress errors from cleanup
+                        pass
+                    
+                    # Process differences even if agent had errors, in case partial results were created
+                    # Track all changes in a single unified patch
+                    unified_patch = []
+                
+                    for d in dir_names:
+                        orig_dir = os.path.join(before_dir, d)
+                        mod_dir = os.path.join(issue_path, d)
+                        orig_files = {f: os.path.join(orig_dir, f) for f in self._get_files(orig_dir)}
+                        mod_files = {f: os.path.join(mod_dir, f) for f in self._get_files(mod_dir)}
+                    
+                        # Handle added and modified files
+                        for rel_path, mod_path in mod_files.items():
+                            context_path = os.path.join(d, rel_path)
+                            try:
+                                with open(mod_path, 'r', encoding='utf-8', errors='replace') as f:
+                                    mod_content = f.read()
+                                
+                                # Added or modified file
+                                if rel_path not in orig_files:
+                                    # New file - use directly
+                                    result[context_path] = mod_content
+                                    # Add new file to unified patch
+                                    unified_patch.append(f"--- /dev/null\n+++ b/{context_path}\n@@ -0,0 +1,{len(mod_content.splitlines())} @@")
+                                    for line in mod_content.splitlines():
+                                        unified_patch.append(f"+{line}")
+                                    unified_patch.append("")  # Empty line between files
+                                else:
+                                    with open(orig_files[rel_path], 'r', encoding='utf-8', errors='replace') as f:
+                                        orig_content = f.read()
+                                    if orig_content != mod_content:
+                                        # Add diff to unified patch
+                                        diff = self._diff(orig_content, mod_content, context_path)
+                                        unified_patch.append(diff)
+                                        unified_patch.append("")  # Empty line between files
+                                        # Use modified content directly
+                                        result[context_path] = mod_content
+                            except Exception as file_e:
+                                file_error = f"Error processing {mod_path}: {str(file_e)}"
+                                logging.error(file_error)
+                                # Store the file-specific error but continue processing other files
+                                result[f'file_error_{context_path}'] = file_error
+                    
+                        # Handle deleted files
+                        for rel_path, orig_path in orig_files.items():
+                            if rel_path not in mod_files:
+                                context_path = os.path.join(d, rel_path)
+                                with open(orig_path, 'r', encoding='utf-8', errors='replace') as f:
+                                    orig_content = f.read()
+                                # Add deletion to unified patch
+                                unified_patch.append(f"--- a/{context_path}\n+++ /dev/null\n@@ -1,{len(orig_content.splitlines())} +0,0 @@")
+                                for line in orig_content.splitlines():
+                                    unified_patch.append(f"-{line}")
+                                unified_patch.append("")  # Empty line between files
+            
+                    # Write the unified patch file
+                    if unified_patch:
+                        patch_file = os.path.join(issue_path, "agent_changes.patch")
+                        with open(patch_file, 'w', encoding='utf-8') as f:
+                            f.write('\n'.join(unified_patch))
+                        result['agent_patch_file'] = patch_file
             
             # Store the results for later use
             self.agent_results[id] = result
@@ -2019,6 +2186,214 @@ class AgenticProcessor (DatasetProcessor):
         # Then, if not in golden mode, process all with agent
         if not self.golden and self.agent:
             self.all_agent()
+
+    # ----------------------------------------
+    # - Git Context and Patch Container Methods
+    # ----------------------------------------
+
+
+
+
+
+    def _generate_volume_changes_patch(self, workspace_volume: str, before_volume: str, issue_path: str):
+        """
+        Generate agent_changes.patch by comparing the current workspace volume content
+        with the before snapshot volume, without extracting files to disk.
+        
+        For context-heavy agentic datapoints, compares the entire /code directory
+        excluding hidden files (.* ) and prompt.json.
+        """
+        
+        try:
+            # Generate diff between the two volumes
+            # For context-heavy datapoints, we need to go through all /code directory and subdirectories
+            # while excluding .*, prompt.json, and rundir/ (since rundir is mounted from host)
+            diff_cmd = [
+                "docker", "run", "--rm",
+                "-v", f"{before_volume}:/before:ro",
+                "-v", f"{workspace_volume}:/after:ro",
+                "ubuntu:22.04",
+                "bash", "-c",
+                # Generate diff between before and after volumes, with proper exclusions
+                "cd / && "
+                "diff -ruN before after "
+                "--exclude='.*' --exclude='prompt.json' --exclude='rundir' "
+                "2>/dev/null || true"  # diff returns non-zero when differences found
+            ]
+            
+            result = subprocess.run(diff_cmd, capture_output=True, text=True, check=False)
+            
+            if result.stdout.strip():
+                # Process the diff output to clean it up
+                diff_output = result.stdout
+                # Replace /before and /after paths to make it a proper patch
+                diff_output = diff_output.replace("before/", "a/")
+                diff_output = diff_output.replace("after/", "b/")
+                
+                # Write the patch to agent_changes.patch
+                patch_file = os.path.join(issue_path, "agent_changes.patch")
+                with open(patch_file, 'w', encoding='utf-8') as f:
+                    f.write(diff_output)
+                
+            else:
+                # Create empty patch file to indicate no changes
+                patch_file = os.path.join(issue_path, "agent_changes.patch")
+                with open(patch_file, 'w', encoding='utf-8') as f:
+                    f.write("# No changes detected\n")
+                
+        except Exception as e:
+            print(f"[WARNING] Failed to generate patch from volumes: {e}")
+            
+            # Fallback: create simple status file
+            try:
+                status_file = os.path.join(issue_path, "agent_changes.patch")
+                with open(status_file, 'w', encoding='utf-8') as f:
+                    f.write(f"# Error generating patch: {e}\n")
+                print(f"[INFO] Created error status in agent_changes.patch")
+            except Exception as e2:
+                print(f"[ERROR] Failed to create error status file: {e2}")
+
+    def _create_before_snapshot_volume(self, workspace_volume: str, issue_path: str):
+        """
+        Create a snapshot Docker volume of the workspace volume before the agent runs,
+        for later comparison to generate agent_changes.patch.
+        
+        This captures the state AFTER initial context patches are applied,
+        which is the starting point for the agent.
+        
+        Returns the name of the created before volume.
+        """
+        # Generate a unique name for the before volume
+        before_volume = f"{workspace_volume}_before"
+        
+        try:
+            # Create the before volume
+            create_vol_cmd = ["docker", "volume", "create", before_volume]
+            subprocess.run(create_vol_cmd, check=True, capture_output=True)
+            
+            # Copy current state from workspace volume to before volume
+            snapshot_cmd = [
+                "docker", "run", "--rm",
+                "-v", f"{workspace_volume}:/source:ro",
+                "-v", f"{before_volume}:/target",
+                "ubuntu:22.04",
+                "bash", "-c",
+                # Copy all content except hidden files and prompt.json
+                "cd /source && "
+                "find . -maxdepth 1 -type f ! -name '.*' ! -name 'prompt.json' -exec cp {} /target/ \\; && "
+                "find . -maxdepth 1 -type d ! -name '.*' ! -name '.' -exec cp -r {} /target/ \\;"
+            ]
+            
+            subprocess.run(snapshot_cmd, check=True, capture_output=True, text=True)
+            return before_volume
+            
+        except Exception as e:
+            print(f"[WARNING] Failed to create before snapshot volume: {e}")
+            # Try to clean up the volume if it was created
+            try:
+                subprocess.run(["docker", "volume", "rm", "-f", before_volume], 
+                             check=False, capture_output=True)
+            except:
+                pass
+            return None
+
+    def create_repo (self, id : str, model : OpenAI_Instance = None):
+        """
+        Clone & checkout a real git repo (via CLI flags or JSON fields),
+        read only the `external/` folder into memory, then fall back to
+        JSON‐dump logic if no git info is present.
+        """
+
+        # 1) Unpack the datapoint
+        (harness, name, issue, patches) = self.extract_datapoint(id)
+        ctx = self.context[id]
+
+        # 2) Pick up the repo URL & commit—CLI flags win over JSON fields
+        repo_url   = getattr(self, "repo_url", None) or ctx.get("context", {}).get("repo")
+        commit_sha = getattr(self, "commit_hash", None) or ctx.get("context", {}).get("commit")
+        data_point = id.split("_")
+
+        try:
+            if not os.getenv("CLONE_HTTP") and "github.com/" in repo_url if repo_url else False:
+                repo_url   = repo_url.split("github.com/")[-1]
+                repo_url   = f"git@github.com:{repo_url}.git"
+        except:
+            pass
+
+        if repo_url and commit_sha:
+            print(f"[DEBUG:create_repo-Agentic] Starting datapoint preparation for id={id}")
+
+            # Use GitRepositoryManager for consistent volume management
+            git_manager = git_utils.get_git_manager(self.prefix)
+            volume_name = f"{id}_workspace"
+            
+            # Get patches if available
+            patches = ctx.get('patch', {}) if not self.disable_patch else {}
+            
+            # Determine root directory (extract only external/ folder for CVDP repos)
+            root_dir = "external" if 'cvdp_' in repo_url or 'cvdp-' in repo_url else None
+            
+            # Create the git workspace using the consolidated approach
+            success = git_manager.create_volume_with_checkout(
+                repo_url=repo_url,
+                commit_hash=commit_sha,
+                volume_name=volume_name,
+                patches=patches,
+                root_dir=root_dir
+            )
+            
+            if not success:
+                print(f"[ERROR] Failed to create git workspace for {id}, falling back to regular mode")
+                # Fall through to the regular mode below
+            else:
+                (_, repo) = self.create_repository(id, harness, name, issue, {})
+                repo.volume_name = volume_name
+                
+                # Register automatic cleanup for the volume
+                import atexit
+                def cleanup_volume():
+                    try:
+                        print(f"[INFO] Cleaning up workspace volume: {volume_name}")
+                        import subprocess
+                        subprocess.run(
+                            ["docker", "volume", "rm", "-f", volume_name],
+                            check=False,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE
+                        )
+                    except Exception as e:
+                        print(f"[WARNING] Failed to cleanup workspace volume {volume_name}: {e}")
+                
+                # Only register cleanup once per volume
+                cleanup_attr = f"_cleanup_volume_{id}_registered"
+                if not hasattr(atexit, cleanup_attr):
+                    atexit.register(cleanup_volume)
+                    setattr(atexit, cleanup_attr, True)
+                    print(f"[INFO] Registered automatic cleanup for volume: {volume_name}")
+                
+                # Create workspace volume script for context heavy datapoints
+                if 'agentic_heavy' in id:
+                    # Create script in the same directory as other scripts (issue_path)
+                    repo.create_workspace_volume_script(
+                        docker_dir=repo.issue_path,
+                        repo_url=repo_url,
+                        commit_hash=commit_sha,
+                        patches=patches,
+                        root_dir=root_dir
+                    )
+                
+                return (True, repo)
+
+        else:
+            # 5) Fallback: original JSON‐dump into self.files[id]
+            if id not in self.files:
+                print(f"Creating harness environment for datapoint: {name}_{issue:04d}")
+            if not self.golden and id in self.agent_results:
+                self.files[id] = self.agent_results[id]
+            else:
+                self.files[id] = self.create_context(id, model)
+
+        return self.create_repository(id, harness, name, issue, patches)
 
     def get_context_for_repo(self, id, model):
         """

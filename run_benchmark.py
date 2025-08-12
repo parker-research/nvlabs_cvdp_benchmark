@@ -384,30 +384,42 @@ if __name__ == "__main__":
 
     # Handle Docker network setup
     shared_network_name = None
+    license_network_auto_created = False  # Track if we auto-create the license network
     if not args.regenerate_report:
         if args.network_name:
-            # Use the specified network name
+            # Use the specified network name for the default network
             shared_network_name = args.network_name
             print(f"Using specified Docker network: {shared_network_name}")
         else:
-            # Auto-generate a network name based on the dataset
+            # Auto-generate a network name based on the dataset for the default network
             shared_network_name = network_util.generate_network_name(filename, shared=True)
             print(f"Generated Docker network name: {shared_network_name}")
+        
+        # Commercial EDA datasets will have an additional license network (handled separately)
+        if eda_validation['required']:
+            print(f"Commercial EDA datasets will also use license network: {eda_validation['network_name']}")
     
         # Create the network if we're not using an external network manager
         if not args.external_network:
-            print("Creating Docker network for all Docker containers in this run...")
-            network_util.create_docker_network(shared_network_name)
-            
-            # Register cleanup function to remove the network on exit
-            def cleanup_network():
-                print(f"Cleaning up Docker network: {shared_network_name}")
-                network_util.remove_docker_network(shared_network_name)
-            
-            # Only register cleanup if we're creating the network
-            atexit.register(cleanup_network)
-            # Mark that we've registered a network cleanup handler
-            setattr(atexit, "_network_cleanup_registered", True)
+            if eda_validation['required']:
+                # License network creation and cleanup is handled during EDA validation
+                # Just update our local flag if it was auto-created
+                if eda_validation.get('auto_created', False):
+                    license_network_auto_created = True
+            else:
+                # For general benchmark networks, create and manage them
+                print("Creating Docker network for all Docker containers in this run...")
+                network_util.create_docker_network(shared_network_name)
+                
+                # Register cleanup function to remove the network on exit
+                def cleanup_network():
+                    print(f"Cleaning up Docker network: {shared_network_name}")
+                    network_util.remove_docker_network(shared_network_name)
+                
+                # Only register cleanup if we're creating the network
+                atexit.register(cleanup_network)
+                # Mark that we've registered a network cleanup handler
+                setattr(atexit, "_network_cleanup_registered", True)
 
     # Set queue timeout if specified
     if args.queue_timeout is not None:
@@ -420,9 +432,20 @@ if __name__ == "__main__":
     # Set up shared network info
     network_args = {}
     if shared_network_name:
+        # Determine if we should manage this network:
+        # - Auto-generated networks: respect --external-network flag  
+        # - Pre-existing EDA license networks: never manage
+        # - Auto-created EDA license networks: manage for cleanup
+        if eda_validation['required']:
+            # For EDA license networks, manage only if we auto-created it
+            manage_network_flag = license_network_auto_created
+        else:
+            # For auto-generated networks, respect the --external-network flag
+            manage_network_flag = not args.external_network
+        
         network_args = {
             'network_name': shared_network_name,
-            'manage_network': not args.external_network
+            'manage_network': manage_network_flag
         }
     
     # Add wrapper constructor arguments
@@ -443,6 +466,8 @@ if __name__ == "__main__":
             'force_agentic_include_golden': args.force_agentic_include_golden,
             'force_agentic_include_harness': args.force_agentic_include_harness,
             'force_copilot': args.force_copilot,
+            'repo_url': args.repo_url,
+            'commit_hash': args.commit_hash,
         })
         obj = AgenticBenchmark(**wrapper_args)
         obj.agent = args.agent
@@ -585,9 +610,4 @@ if __name__ == "__main__":
     except Exception as e:
         raise Exception(f"Unable to process the JSON file: {filename}. Error: {str(e)}")
 
-    # If we're managing networks (not external), clean up the network
-    # This cleanup is handled by the atexit handler, but add it here explicitly
-    # only if we haven't registered the atexit handler for some reason
-    if shared_network_name and not args.external_network and not args.regenerate_report and not hasattr(atexit, "_network_cleanup_registered"):
-        print(f"Cleaning up Docker network: {shared_network_name}")
-        network_util.remove_docker_network(shared_network_name)
+    # Network cleanup is handled by atexit handlers registered during network creation

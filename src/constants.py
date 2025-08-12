@@ -25,6 +25,9 @@ BLEU_SCORING_CATEGORIES = [6, 8]
 CODE_GEN_CATEGORIES = [2, 3, 4, 5, 7, 12, 13, 14, 16]
 
 # Categories that require commercial EDA verification tools and license network connectivity
+# Note: This is category-based detection only. Additional datapoints in other categories 
+# (e.g., cid003, cid005) may also require commercial EDA tools if they contain __VERIF_EDA_IMAGE__ 
+# template variables. Use requires_commercial_eda_tools() for comprehensive detection.
 VERIF_EDA_CATEGORIES = [12, 13, 14]
 
 # ----------------------------------------

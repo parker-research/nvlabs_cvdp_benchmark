@@ -49,23 +49,35 @@ def diff_apply(text, diff_text, reverse=False):
 
             if not reverse:
                 # Delete the line.
-                del text_patched[i-1]
-                i -= 1
+                if i > 0 and i-1 < len(text_patched):
+                    del text_patched[i-1]
+                    i -= 1
+                else:
+                    print(f"Warning: Cannot delete line at index {i-1}, out of range (max: {len(text_patched)-1})")
             else:
                 # Add in a new line.
                 line = line[1:]
-                text_patched.insert(i-1, line)
+                if i > 0 and i-1 <= len(text_patched):
+                    text_patched.insert(i-1, line)
+                else:
+                    print(f"Warning: Cannot insert line at index {i-1}, out of range (max: {len(text_patched)})")
 
         elif line.startswith('+'):
 
             if not reverse:
                 # Add in a new line.
                 line = line[1:]
-                text_patched.insert(i-1, line)
+                if i > 0 and i-1 <= len(text_patched):
+                    text_patched.insert(i-1, line)
+                else:
+                    print(f"Warning: Cannot insert line at index {i-1}, out of range (max: {len(text_patched)})")
             else:
                 # Delete the line.
-                del text_patched[i-1]
-                i -= 1
+                if i > 0 and i-1 < len(text_patched):
+                    del text_patched[i-1]
+                    i -= 1
+                else:
+                    print(f"Warning: Cannot delete line at index {i-1}, out of range (max: {len(text_patched)-1})")
 
     text_patched = '\n'.join(text_patched)
     return text_patched

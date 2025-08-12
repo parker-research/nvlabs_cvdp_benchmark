@@ -82,6 +82,13 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
                        help="Force copilot mode processing for agentic datasets")
     parser.add_argument("--copilot-refine", type=str,
                        help="Refine Copilot datasets with the specified model")
+    
+    # Context-heavy agentic arguments
+    parser.add_argument("--repo-url", type=str,
+                       help="(Agentic only) Git repository URL for cloning context-heavy datapoints")
+    parser.add_argument("--commit-hash", type=str,
+                       help="(Agentic only) Commit hash to checkout for context-heavy datapoints")
+    
     # TODO: Temporarily disabled - hardcoded to True in run_benchmark.py
     # parser.add_argument("--enable-sbj-scoring", action="store_true",
     #                    help="Enable LLM-based subjective scoring")
