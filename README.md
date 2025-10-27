@@ -128,7 +128,7 @@ cd my-agent/
 cd ..
 
 # Run 5 samples for statistical reliability with Pass@1
-./run_samples.py -f example_dataset/cvdp_v1.0.1_example_agentic_code_generation_no_commercial_with_solutions.jsonl -l -g example-agent -n 5 -k 1 -p work_composite
+./run_samples.py -f example_dataset/cvdp_v1.0.1_example_agentic_code_generation_no_commercial_with_solutions.jsonl -l -g cvdp-example-agent -n 5 -k 1 -p work_composite
 
 # Check results in composite_report.txt
 cat work_composite/composite_report.txt
@@ -138,7 +138,7 @@ cat work_composite/composite_report.txt
 ```bash
 # Run agent on same dataset  
 # NOTE: Example agent is for demonstration only - expect low success rates
-./run_benchmark.py -f example_dataset/cvdp_v1.0.1_example_agentic_code_generation_no_commercial_with_solutions.jsonl -l -g example-agent -p work_agent
+./run_benchmark.py -f example_dataset/cvdp_v1.0.1_example_agentic_code_generation_no_commercial_with_solutions.jsonl -l -g cvdp-example-agent -p work_agent
 
 # Check agent results
 cat work_agent/report.txt
@@ -149,7 +149,7 @@ cat work_agent/report.txt
 # Agent run on commercial problems (5 samples)
 # NOTE: Requires commercial EDA tools (Cadence Xcelium), license network, and VERIF_EDA_IMAGE setup
 # NOTE: This is a dummy agent that will fail - it just replaces "input" with "loompa" in RTL
-./run_samples.py -f example_dataset/cvdp_v1.0.1_example_agentic_code_generation_commercial_with_solutions.jsonl -l -g example-agent -n 5 -k 1 -p work_agentic_commercial_composite
+./run_samples.py -f example_dataset/cvdp_v1.0.1_example_agentic_code_generation_commercial_with_solutions.jsonl -l -g cvdp-example-agent -n 5 -k 1 -p work_agentic_commercial_composite
 
 # Check results
 cat work_agentic_commercial_composite/composite_report.txt
@@ -159,7 +159,7 @@ cat work_agentic_commercial_composite/composite_report.txt
 ```bash
 # Run one problem to examine the agent workflow
 # USEFUL: Good for understanding how agents interact with the environment and debug failures  
-./run_benchmark.py -f example_dataset/cvdp_v1.0.1_example_agentic_code_generation_no_commercial_with_solutions.jsonl -i cvdp_agentic_fixed_arbiter_0001 -l -g example-agent -p work_debug
+./run_benchmark.py -f example_dataset/cvdp_v1.0.1_example_agentic_code_generation_no_commercial_with_solutions.jsonl -i cvdp_agentic_fixed_arbiter_0001 -l -g cvdp-example-agent -p work_debug
 
 # Navigate to the work directory to examine agent execution
 cd work_debug/cvdp_agentic_fixed_arbiter_0001/harness/1/
