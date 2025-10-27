@@ -139,7 +139,7 @@ def add_network_to_docker_compose(docker_compose_path, network_name):
         
         # If the file is empty or invalid, create a basic structure
         if not data:
-            data = {'version': '3', 'services': {}}
+            data = {'services': {}}
         
         # Check if networks section already exists and if it has a default network
         if 'networks' not in data or 'default' not in data.get('networks', {}):

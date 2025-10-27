@@ -1587,7 +1587,6 @@ class AgenticProcessor (DatasetProcessor):
         if use_git_workspace and workspace_volume:
             # Use volume-based mounting for git workspaces
             docker_compose = {
-                'version': '3',
                 'services': {
                     'agent': {
                         'image': agent,
@@ -1612,7 +1611,6 @@ class AgenticProcessor (DatasetProcessor):
         else:
             # Use traditional directory-based mounting
             docker_compose = {
-                'version': '3',
                 'services': {
                     'agent': {
                         'image': agent,
