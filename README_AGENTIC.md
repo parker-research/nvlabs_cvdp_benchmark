@@ -187,7 +187,6 @@ The agentic workflow uses two Docker Compose files:
 The system automatically generates a `docker-compose-agent.yml` file with:
 
 ```yaml
-version: '3'
 services:
   agent:
     image: your-agent-name
@@ -205,7 +204,6 @@ services:
 The test harness uses a `docker-compose.yml` file from the dataset, or generates a default:
 
 ```yaml
-version: '3'
 services:
   test:
     image: us-central1-docker.pkg.dev/turing-gpt/verilogeval/cadence-tools
@@ -459,7 +457,6 @@ echo '{"prompt": "test task"}' > test_agent/prompt.json
 
 # Create docker-compose.yml
 cat > test_agent/docker-compose.yml << EOF
-version: '3'
 services:
   agent:
     image: my-agent
