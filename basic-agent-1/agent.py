@@ -60,13 +60,19 @@ def chat(prompt: str) -> str:
 
 
 def main(goal_str: str) -> None:
-    file_listing_str = "\n".join(f"- {f}" for f in sorted(Path("/code").rglob("*")) if f.is_file())
-    _ = chat(f"GOAL: {goal_str}\n\nFILE LISTING:\n{file_listing_str}\n\nWHAT IS YOUR OVERALL PLAN?")
+    file_listing_str = "\n".join(
+        f"- {f}" for f in sorted(Path("/code").rglob("*")) if f.is_file()
+    )
+    _ = chat(
+        f"GOAL: {goal_str}\n\nFILE LISTING:\n{file_listing_str}\n\n"
+        "WHAT IS YOUR OVERALL PLAN? THINK, BUT DO NOT WRITE BASH."
+    )
 
     conversation_cycle_num = 0
     for conversation_cycle_num in range(CONFIG_MAX_ITERATIONS):
         response_command = chat(
-            "SHELL COMMAND/SCRIPT TO EXECUTE OR `DONE`. NO MARKDOWN. NO ADDITIONAL CONTEXT OR EXPLANATION:"
+            "SHELL COMMAND/SCRIPT TO EXECUTE OR `DONE`. "
+            "NO MARKDOWN, NO ADDITIONAL CONTEXT OR EXPLANATION:"
         ).strip()
         if response_command == "DONE":
             break
@@ -89,11 +95,9 @@ def main(goal_str: str) -> None:
                     return_code = -1
                     output += b"\n[ERROR] Command timed out after 30 seconds.\n"
 
-
         _ = chat(
-            "COMMAND COMPLETED WITH RETURN CODE: "
-            + str(return_code)
-            + ". OUTPUT:\n"
+            f"COMMAND COMPLETED WITH RETURN CODE: {return_code}. "
+            + "OUTPUT:\n"
             + output.decode()
             # Important: Tell the agent that now is not the time to write bash, otherwise
             # it think that it's emitted bash, and then thinks that it can be done without
