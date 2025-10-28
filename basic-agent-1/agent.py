@@ -60,7 +60,8 @@ def chat(prompt: str) -> str:
 
 
 def main(goal_str: str) -> None:
-    _ = chat("GOAL: " + goal_str + "\n\nWHAT IS YOUR OVERALL PLAN?")
+    file_listing_str = "\n".join(f"- {f}" for f in sorted(Path("/code").rglob("*")) if f.is_file())
+    _ = chat(f"GOAL: {goal_str}\n\nFILE LISTING:\n{file_listing_str}\n\nWHAT IS YOUR OVERALL PLAN?")
 
     conversation_cycle_num = 0
     for conversation_cycle_num in range(CONFIG_MAX_ITERATIONS):
@@ -74,7 +75,7 @@ def main(goal_str: str) -> None:
             script_path = Path(temp_dir_str) / "script.bash"
             script_path.write_text(response_command)
             with subprocess.Popen(
-                ["/bin/bash", str(script_path)],
+                ["/bin/bash", script_path.resolve().as_posix()],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 cwd="/code",
