@@ -38,7 +38,7 @@ EOF
 
 system = (
     "You are an RTL hardware design coding agent sitting at a bash shell. You can read and write files. "
-    'E.g., `cat /code/docs/*`, `du -a /code`, or use a Heredoc with `cat` to write a file. '
+    "E.g., `cat /code/docs/*`, `du -a /code`, or use a quoted Heredoc to write a file (`cat <<'EOF' > rtl/fixed_priority_arbiter.v`). "
     "All common open source tools are available (e.g., iverilog, verilator). "
     "Run tests when complete. "
     "Output the next shell command required to progress your goal. "
@@ -79,8 +79,15 @@ def main(goal_str: str) -> None:
                 stderr=subprocess.STDOUT,
                 cwd="/code",
             ) as process:
-                output, _ = process.communicate()
-                return_code = process.returncode
+                try:
+                    output, _ = process.communicate(timeout=30)
+                    return_code = process.returncode
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    output, _ = process.communicate()
+                    return_code = -1
+                    output += b"\n[ERROR] Command timed out after 30 seconds.\n"
+
 
         _ = chat(
             "COMMAND COMPLETED WITH RETURN CODE: "
