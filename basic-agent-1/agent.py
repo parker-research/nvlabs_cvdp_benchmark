@@ -95,7 +95,10 @@ def main(goal_str: str) -> None:
             + str(return_code)
             + ". OUTPUT:\n"
             + output.decode()
-            + "\n\nWHAT ARE YOUR OBSERVATIONS? "
+            # Important: Tell the agent that now is not the time to write bash, otherwise
+            # it think that it's emitted bash, and then thinks that it can be done without
+            # ever actually executing a command.
+            + "\n\nWHAT ARE YOUR OBSERVATIONS? THINK, BUT DO NOT WRITE BASH. "
             + f"YOU HAVE {CONFIG_MAX_ITERATIONS - conversation_cycle_num - 1} CYCLES LEFT."
         )
     else:
