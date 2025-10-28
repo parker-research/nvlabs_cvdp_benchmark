@@ -3,8 +3,6 @@ FROM ghcr.io/hdl/sim/osvb
 # https://github.com/RDSik/FPGA-Tools-Docker
 # FROM ghcr.io/r0d0s/fpga_tools:latest
 
-WORKDIR /app
-
 # Install dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -20,13 +18,10 @@ RUN apt-get update && \
 # https://docs.astral.sh/uv/guides/integration/docker/#installing-uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Fix cache path.
-# RUN mkdir -p /.cache/uv && chmod 777 /.cache/uv
-# ENV UV_CACHE_DIR=/.cache/uv
-# ENV UV_CACHE_DIR=/tmp/.cache/uv
-# RUN mkdir -p /tmp/.cache/uv && chmod -R 777 /tmp/.cache
-RUN mkdir -p /.cache/uv && chmod -R 777 /.cache
+WORKDIR /app
 
+# Fix uv cache path.
+RUN mkdir -p /.cache/uv && chmod -R 777 /.cache
 
 RUN uv venv --python 3.12
 RUN uv pip install openai loguru pyyaml
@@ -43,5 +38,6 @@ RUN which iverilog
 SHELL ["/bin/bash", "-c"]
 ENV SHELL=/bin/bash
 
-# Set the entrypoint
+# Set the entrypoint.
+WORKDIR /app
 ENTRYPOINT ["uv", "run", "/app/agent.py"]

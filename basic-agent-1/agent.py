@@ -3,6 +3,13 @@
 Inspired by: https://www.reddit.com/r/ChatGPTCoding/comments/164ughh/a_tiny_autonomous_agent_i_made_in_25_lines_of/
 """
 
+# https://docs.astral.sh/uv/guides/scripts/#declaring-script-dependencies
+# /// script
+# dependencies = [
+#   "openai",
+# ]
+# ///
+
 from pathlib import Path
 import subprocess
 import os
