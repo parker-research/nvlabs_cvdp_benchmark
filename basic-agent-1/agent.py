@@ -26,9 +26,19 @@ client = OpenAI(
     api_key=os.environ["OPENAI_USER_KEY"],
 )
 
+# TODO: Consider integrating this heredoc example into the prompt.
+HEREDOC_EXAMPLE = """
+```bash
+cat <<'EOF' > helloworld.txt
+hello
+world
+EOF
+```
+""".strip()
+
 system = (
     "You are an RTL hardware design coding agent sitting at a bash shell. You can read and write files. "
-    'E.g., `cat /code/docs/*`, `echo "hello\\nworld" > helloworld.txt`, `du -a /code`, etc. '
+    'E.g., `cat /code/docs/*`, `du -a /code`, or use a Heredoc with `cat` to write a file. '
     "All common open source tools are available (e.g., iverilog, verilator). "
     "Run tests when complete. "
     "Output the next shell command required to progress your goal. "
