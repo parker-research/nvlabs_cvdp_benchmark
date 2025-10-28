@@ -13,6 +13,7 @@ Inspired by: https://www.reddit.com/r/ChatGPTCoding/comments/164ughh/a_tiny_auto
 from pathlib import Path
 import subprocess
 import os
+import tempfile
 
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
@@ -21,12 +22,13 @@ CONFIG_MAX_ITERATIONS = 10
 
 # Initialize the OpenAI client
 client = OpenAI(
-    api_key=os.environ["OPENAI_USER_KEY"], # cvdp agent docker-compose uses a different environment variable name
+    # cvdp agent docker-compose uses a different environment variable name.
+    api_key=os.environ["OPENAI_USER_KEY"],
 )
 
 system = (
     "You are an RTL hardware design coding agent sitting at a bash shell. You can read and write files. "
-    "E.g., `cat /code/docs/*`, `echo \"hello\\nworld\" > helloworld.txt`, `du -a /code`, etc. "
+    'E.g., `cat /code/docs/*`, `echo "hello\\nworld" > helloworld.txt`, `du -a /code`, etc. '
     "All common open source tools are available (e.g., iverilog, verilator). "
     "Run tests when complete. "
     "Output the next shell command required to progress your goal. "
@@ -36,42 +38,45 @@ system = (
 
 messages: list[ChatCompletionMessageParam] = [{"role": "system", "content": system}]
 
+
 def chat(prompt: str) -> str:
     print("\n\033[0;36m[PROMPT]\033[0m " + prompt)
     messages.append({"role": "user", "content": prompt})
-    
-    # Updated API call for the new SDK
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages
-    )
-    
+    response = client.chat.completions.create(model="gpt-4o-mini", messages=messages)
     message = response.choices[0].message
     messages.append(message)
-    
     print("\033[1;33m[RESPONSE]\033[0m " + message.content)
     return message.content
 
 
 def main(goal_str: str) -> None:
-    response = chat("GOAL: " + goal_str + "\n\nWHAT IS YOUR OVERALL PLAN?")
+    _ = chat("GOAL: " + goal_str + "\n\nWHAT IS YOUR OVERALL PLAN?")
 
     conversation_cycle_num = 0
     for conversation_cycle_num in range(CONFIG_MAX_ITERATIONS):
-        response = chat("SHELL COMMAND TO EXECUTE OR `DONE`. NO MARKDOWN. NO ADDITIONAL CONTEXT OR EXPLANATION:").strip()
-        if response == "DONE":
+        response_command = chat(
+            "SHELL COMMAND/SCRIPT TO EXECUTE OR `DONE`. NO MARKDOWN. NO ADDITIONAL CONTEXT OR EXPLANATION:"
+        ).strip()
+        if response_command == "DONE":
             break
 
-        # time.sleep(3)
-        process = subprocess.Popen(
-            response, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd="/code"
-        )
-        output, _ = process.communicate()
-        return_code = process.returncode
+        with tempfile.TemporaryDirectory() as temp_dir_str:
+            script_path = Path(temp_dir_str) / "script.bash"
+            script_path.write_text(response_command)
+            with subprocess.Popen(
+                ["/bin/bash", str(script_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                cwd="/code",
+            ) as process:
+                output, _ = process.communicate()
+                return_code = process.returncode
 
-        response = chat(
-            "COMMAND COMPLETED WITH RETURN CODE: " + str(return_code)
-            + ". OUTPUT:\n" + output.decode()
+        _ = chat(
+            "COMMAND COMPLETED WITH RETURN CODE: "
+            + str(return_code)
+            + ". OUTPUT:\n"
+            + output.decode()
             + "\n\nWHAT ARE YOUR OBSERVATIONS? "
             + f"YOU HAVE {CONFIG_MAX_ITERATIONS - conversation_cycle_num - 1} CYCLES LEFT."
         )
@@ -80,6 +85,7 @@ def main(goal_str: str) -> None:
         raise RuntimeError(f"Max iterations reached ({CONFIG_MAX_ITERATIONS})")
 
     print(f"=== Agent run completed ({conversation_cycle_num} conversation cycles) ===")
+
 
 if __name__ == "__main__":
     main(Path("/code/prompt.json").read_text())
