@@ -1,0 +1,42 @@
+# FROM ghcr.io/hdl/sim/osvb
+
+# https://github.com/RDSik/FPGA-Tools-Docker
+FROM ghcr.io/r0d0s/fpga_tools:latest
+
+WORKDIR /app
+
+# Install dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        wget build-essential libssl-dev zlib1g-dev \
+	    libncurses5-dev libncursesw5-dev libreadline-dev libsqlite3-dev \
+		libgdbm-dev libdb5.3-dev libbz2-dev libexpat1-dev liblzma-dev tk-dev \
+        git tree \
+    && apt-get clean \
+    && rm -rf /var/list/apt/lists/*
+
+
+# Install `uv` for managing Python.
+# https://docs.astral.sh/uv/guides/integration/docker/#installing-uv
+FROM python:3.12-slim-trixie
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Fix cache path.
+# RUN mkdir -p /.cache/uv && chmod 777 /.cache/uv
+# ENV UV_CACHE_DIR=/.cache/uv
+# ENV UV_CACHE_DIR=/tmp/.cache/uv
+# RUN mkdir -p /tmp/.cache/uv && chmod -R 777 /tmp/.cache
+RUN mkdir -p /.cache/uv && chmod -R 777 /.cache
+
+
+RUN uv venv --python 3.12
+RUN uv pip install openai loguru pyyaml
+
+# Create /code directory and set permissions
+RUN mkdir -p /code && chmod 777 /code
+
+# Copy agent code
+COPY agent.py /app/agent.py
+
+# Set the entrypoint
+ENTRYPOINT ["uv", "run", "/app/agent.py"]
