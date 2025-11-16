@@ -113,4 +113,5 @@ def main(goal_str: str) -> None:
 
 
 if __name__ == "__main__":
+    # TODO: Should probably actually just join the values of the elements of this dict.
     main(Path("/code/prompt.json").read_text())
