@@ -79,20 +79,21 @@ class SubjectiveScoreModel_Instance:
         """
         return True
     
-    def subjective_score(self, response: str, reference: str, problem_prompt: str = "") -> float:
+    def subjective_score(self, response: str, reference: str, problem_prompt: str = "") -> tuple:
         """
         Calculate a subjective score for a response compared to a reference answer.
-        
+
         Args:
             response: The model-generated response to evaluate
             reference: The reference (golden) answer to compare against
             problem_prompt: The original problem prompt for context
-            
+
         Returns:
-            A normalized score from 0.0-1.0 where 1.0 is perfect match and 0.0 is no match
+            Tuple of (score, reasoning) where score is a float 0.0-1.0 (or None on error)
+            and reasoning is a string explaining the score (or error message).
         """
         if not hasattr(self, 'client'):
-            raise ValueError("OpenAI client not initialized")
+            return (None, "OpenAI client not initialized")
         
         # Create a system prompt specific to subjective scoring task
         system_prompt = """You are an expert at evaluating the quality of responses compared to reference solutions.
@@ -165,7 +166,7 @@ An example response is:
             result_text = completion.choices[0].message.content
             if result_text is None:
                 logging.error("Subjective scoring model returned None content")
-                return None
+                return (None, "Model returned None content")
 
             # Extract the JSON from the response
             import re
@@ -198,21 +199,24 @@ An example response is:
                         result = _parse_score_json(json_match.group())
                     else:
                         logging.error(f"Failed to extract JSON from response: {result_text[:300]}")
-                        return None
+                        return (None, f"Failed to extract JSON from response: {result_text[:300]}")
 
                 score = float(result["score"])
                 score = max(0.0, min(1.0, score))
 
+                reasoning = result.get('reasoning', 'No reasoning provided')
                 if self.debug:
                     print(f"Score: {score}/1.0")
-                    print(f"Reasoning: {result.get('reasoning', 'No reasoning provided')}")
-                return score
+                    print(f"Reasoning: {reasoning}")
+                # Always log reasoning so low/unexpected scores can be debugged
+                logging.info(f"Subjective score={score:.3f} reasoning={reasoning[:200]}")
+                return (score, reasoning)
 
             except (json.JSONDecodeError, ValueError) as e:
                 logging.error(f"Failed to parse JSON: {str(e)}")
                 logging.error(f"Raw response was: {result_text[:300]}")
-                return None
+                return (None, f"Failed to parse JSON: {str(e)}. Raw: {result_text[:300]}")
 
         except Exception as e:
             logging.error(f"Error in subjective scoring: {str(e)}")
-            return None
+            return (None, f"Error in subjective scoring: {str(e)}")

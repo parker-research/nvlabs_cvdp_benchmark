@@ -834,8 +834,8 @@ class Repository:
         try:
             # LLM-based subjective scoring if model is provided and it is LLM subjective categories
             if self.sbj_llm_model and category not in BLEU_SCORING_CATEGORIES:
-                # Run LLM-based subjective scoring
-                llm_score = self.subjective_score(response, reference, problem_prompt)
+                # Run LLM-based subjective scoring; returns (score, reasoning) tuple
+                llm_score, llm_reasoning = self.subjective_score(response, reference, problem_prompt)
                 llm_time = time.time()
 
                 if llm_score is None:
@@ -844,7 +844,7 @@ class Repository:
                     error_msg = "LLM subjective scoring failed (API or parse error)"
                     if logfile != "":
                         with open(f"{logfile}_llm_score.txt", 'w+') as out:
-                            out.write(res + f"\n\nLLM Score: ERROR\n")
+                            out.write(res + f"\n\nLLM Score: ERROR\nReason: {llm_reasoning}\n")
                     result.append({"result": err, "log": f"{logfile}_llm_score.txt", "error_msg": error_msg, "execution": llm_time - start_time, "llm_score": None})
                 else:
                     llm_pass = llm_score >= self.llm_score_th
@@ -852,7 +852,7 @@ class Repository:
                     if logfile != "":
                         # LLM Score Logfile
                         with open(f"{logfile}_llm_score.txt", 'w+') as out:
-                            out.write(res + f"\n\nLLM Score (0-1) : {llm_score}\n")
+                            out.write(res + f"\n\nLLM Score (0-1) : {llm_score}\nReasoning: {llm_reasoning}\n")
                     result.append({"result": err, "log": f"{logfile}_llm_score.txt", "error_msg": None, "execution": llm_time - start_time, "llm_score": llm_score})
             else:
                 # Traditional metrics - ROUGE and BLEU
@@ -905,17 +905,15 @@ class Repository:
             float: A normalized score from 0.0-1.0 where 1.0 is perfect match and 0.0 is no match
         """
         try:
-            # Use the model provided during initialization
-            # if self.sbj_llm_model is not None:
-            # Call the subjective_score method on the model
-            score = self.sbj_llm_model.subjective_score(response, reference, problem_prompt)
-            
+            # Call the subjective_score method on the model; returns (score, reasoning) tuple
+            score, reasoning = self.sbj_llm_model.subjective_score(response, reference, problem_prompt)
+
             if self.debug:
                 if score is None:
                     print(f"LLM-based subjective score: ERROR (threshold: {self.llm_score_th})")
                 else:
                     print(f"LLM-based subjective score: {score}/1.0 (threshold: {self.llm_score_th})")
-            return score
+            return score, reasoning
             # else:
             #     # No model available - use fallback scoring method
             #     print("Warning: No LLM model provided for subjective scoring. Using fallback method.")
@@ -938,8 +936,7 @@ class Repository:
                 
         except Exception as e:
             print(f"Error in LLM subjective scoring: {str(e)}")
-            # Return middle score on error to avoid failing the test completely
-            return 0.0
+            return None, str(e)
 
     def obj_harness(self, issue_path : str = "", logfile : str = "", uut : str = None):
 
