@@ -40,6 +40,4 @@ ENV LM_LICENSE_FILE="$CDS_LIC_FILE"
 RUN dnf -y install python3.12
 ADD https://bootstrap.pypa.io/get-pip.py get-pip.py
 RUN python3 ./get-pip.py
-RUN python3 -m pip install pytest pytest-timeout
-
-
+RUN python3 -m pip install pytest=9.0.2 pytest-timeout==2.4.0

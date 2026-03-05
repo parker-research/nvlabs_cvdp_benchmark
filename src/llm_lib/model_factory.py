@@ -30,6 +30,7 @@ class ModelFactory:
             "gpt-4-turbo": self._create_openai_instance,
             "gpt-4o": self._create_openai_instance,
             "gpt-4o-mini": self._create_openai_instance,
+            "o4-mini": self._create_openai_instance,
             "o3-pro": self._create_openai_responses_instance,
             
             # Subjective scoring model

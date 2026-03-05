@@ -45,6 +45,9 @@ def diff_apply(text, diff_text, reverse=False):
         elif line.startswith('---') or line.startswith('+++'):
             pass
 
+        elif line.startswith('\\'):
+            i -= 1  # Meta-line (e.g. "\ No newline at end of file"); undo unconditional i += 1
+
         elif line.startswith('-'):
 
             if not reverse:

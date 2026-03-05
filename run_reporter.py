@@ -68,9 +68,16 @@ def extract_problem_id_from_test_id(test_id: str) -> str:
     """
     if "." not in test_id:
         return test_id
-    
-    # Split from right side only once - everything before the last dot is the problem ID
-    return test_id.rsplit(".", 1)[0]
+
+    # Split from right side only once
+    potential_id, suffix = test_id.rsplit(".", 1)
+
+    # Only strip the suffix if it looks like a test suffix (pure digits or 'test' + digits).
+    # Otherwise the dot is part of the problem name itself (e.g., H.264), so return the full string.
+    import re
+    if re.match(r'^(test)?\d+$', suffix):
+        return potential_id
+    return test_id
 
 def is_category_score_based(category_id: str) -> bool:
     """

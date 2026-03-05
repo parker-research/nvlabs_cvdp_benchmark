@@ -67,6 +67,8 @@ def apply_template_substitution(content: str) -> str:
     }
     
     # Apply substitutions for any placeholders found
+    if content is None:
+        return content
     for placeholder, value in substitutions.items():
         if value and placeholder in content:
             content = content.replace(placeholder, value)
@@ -826,7 +828,8 @@ class Repository:
         start_time = time.time()
         result = []
         err = 0
-        logfile = ""
+        logfile = self.logfile or ""
+        res = f"Reference:\n{reference}\n\nResponse:\n{response}\n"
 
         try:
             # LLM-based subjective scoring if model is provided and it is LLM subjective categories
@@ -834,15 +837,23 @@ class Repository:
                 # Run LLM-based subjective scoring
                 llm_score = self.subjective_score(response, reference, problem_prompt)
                 llm_time = time.time()
-                llm_pass = llm_score >= self.llm_score_th
 
-                err = (not llm_pass)
-                if logfile != "":
-                    # LLM Score Logfile
-                    with open(f"{logfile}_llm_score.txt", 'w+') as out:
-                        out.write(res + f"\n\nLLM Score (0-1) : {llm_score}\n")
-
-                result.append({"result": err, "log": f"{logfile}_llm_score.txt", "error_msg": None, "execution": llm_time - start_time, "llm_score": llm_score})
+                if llm_score is None:
+                    # Scoring failed (API error, parse error, etc.) — record as error, not a 0 score
+                    err = 1
+                    error_msg = "LLM subjective scoring failed (API or parse error)"
+                    if logfile != "":
+                        with open(f"{logfile}_llm_score.txt", 'w+') as out:
+                            out.write(res + f"\n\nLLM Score: ERROR\n")
+                    result.append({"result": err, "log": f"{logfile}_llm_score.txt", "error_msg": error_msg, "execution": llm_time - start_time, "llm_score": None})
+                else:
+                    llm_pass = llm_score >= self.llm_score_th
+                    err = (not llm_pass)
+                    if logfile != "":
+                        # LLM Score Logfile
+                        with open(f"{logfile}_llm_score.txt", 'w+') as out:
+                            out.write(res + f"\n\nLLM Score (0-1) : {llm_score}\n")
+                    result.append({"result": err, "log": f"{logfile}_llm_score.txt", "error_msg": None, "execution": llm_time - start_time, "llm_score": llm_score})
             else:
                 # Traditional metrics - ROUGE and BLEU
                 rouge = subjective.calculate_ROUGE(response, reference, self.n_gram)
@@ -900,7 +911,10 @@ class Repository:
             score = self.sbj_llm_model.subjective_score(response, reference, problem_prompt)
             
             if self.debug:
-                print(f"LLM-based subjective score: {score}/1.0 (threshold: {self.llm_score_th})")
+                if score is None:
+                    print(f"LLM-based subjective score: ERROR (threshold: {self.llm_score_th})")
+                else:
+                    print(f"LLM-based subjective score: {score}/1.0 (threshold: {self.llm_score_th})")
             return score
             # else:
             #     # No model available - use fallback scoring method

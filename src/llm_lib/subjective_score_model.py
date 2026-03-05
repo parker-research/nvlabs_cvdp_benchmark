@@ -163,11 +163,21 @@ An example response is:
             )
             
             result_text = completion.choices[0].message.content
-            
+            if result_text is None:
+                logging.error("Subjective scoring model returned None content")
+                return None
+
             # Extract the JSON from the response
             import re
             import json
-            
+
+            def _parse_score_json(text):
+                """Return parsed JSON dict or raise ValueError."""
+                result = json.loads(text)
+                if "score" in result and isinstance(result["score"], (int, float)):
+                    return result
+                raise ValueError("Missing or non-numeric 'score' field")
+
             # Try to parse the response as JSON
             try:
                 # Extract JSON from the response (it might be wrapped in markdown code blocks)
@@ -177,27 +187,32 @@ An example response is:
                     json_content = result_text.split("```")[1].rsplit("```", 1)[0].strip()
                 else:
                     json_content = result_text
-                
-                result = json.loads(json_content)
-                
-                # Validate schema
-                if "score" in result and isinstance(result["score"], (int, float)):
-                    score = float(result["score"])
-                    # Ensure score is in 0.0-1.0 range
-                    score = max(0.0, min(1.0, score))
-                    
-                    if self.debug:
-                        print(f"Score: {score}/1.0")
-                        print(f"Reasoning: {result.get('reasoning', 'No reasoning provided')}")
-                    return score
-                else:
-                    logging.error("Invalid JSON schema in response")
-                    return 0.0  # Return lowest score on error
-            
+
+                try:
+                    result = _parse_score_json(json_content)
+                except (json.JSONDecodeError, ValueError):
+                    # Fallback: search for a JSON object containing "score" anywhere in the text
+                    # (handles reasoning models that include preamble before the JSON)
+                    json_match = re.search(r'\{[^{}]*"score"\s*:[^{}]*\}', result_text, re.DOTALL)
+                    if json_match:
+                        result = _parse_score_json(json_match.group())
+                    else:
+                        logging.error(f"Failed to extract JSON from response: {result_text[:300]}")
+                        return None
+
+                score = float(result["score"])
+                score = max(0.0, min(1.0, score))
+
+                if self.debug:
+                    print(f"Score: {score}/1.0")
+                    print(f"Reasoning: {result.get('reasoning', 'No reasoning provided')}")
+                return score
+
             except (json.JSONDecodeError, ValueError) as e:
                 logging.error(f"Failed to parse JSON: {str(e)}")
-                return 0.0  # Return lowest score on error
-                
+                logging.error(f"Raw response was: {result_text[:300]}")
+                return None
+
         except Exception as e:
             logging.error(f"Error in subjective scoring: {str(e)}")
-            return 0.0  # Return lowest score on error 
+            return None
