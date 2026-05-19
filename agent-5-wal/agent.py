@@ -38,17 +38,16 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any
 
 from openai import OpenAI
-from openai.types.chat import ChatCompletionMessageParam
+from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolUnionParam
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-CONFIG_MAX_ITERATIONS: int = 16  # tool-call round-trips (more headroom)
-CONFIG_MODEL_NAME: str = "gpt-4o"  # supports native tool-calling
+CONFIG_MAX_ITERATIONS: int = 16  # tool-call round-trips
+CONFIG_MODEL_NAME: str = "gpt-5.4-mini"  # supports native tool-calling
 CONFIG_OUTPUT_TRUNCATE_CHARS: int = 8_000  # max chars of bash output kept in ctx
 MAIN_CODE_FOLDER_PATH = Path("/code")
 
@@ -58,7 +57,7 @@ client = OpenAI(api_key=os.environ["OPENAI_USER_KEY"])
 # Tool schemas (OpenAI function-calling format)
 # ---------------------------------------------------------------------------
 
-TOOLS: list[dict[str, Any]] = [
+TOOLS: list[ChatCompletionToolUnionParam] = [
     {
         "type": "function",
         "function": {
@@ -178,11 +177,6 @@ def tool_wal_analyze(waveform_file: str, expression: str) -> str:
         )
         output = proc.stdout.decode(errors="replace")
         rc = proc.returncode
-    except FileNotFoundError:
-        # WAL not installed — fall back to a plain Python VCD parser so the
-        # agent still gets *some* signal information rather than nothing.
-        output = _wal_fallback_python(str(wf_path), expression)
-        rc = 0
     except subprocess.TimeoutExpired:
         output = "[WAL ERROR] Analysis timed out."
         rc = -1
@@ -190,41 +184,6 @@ def tool_wal_analyze(waveform_file: str, expression: str) -> str:
         Path(wal_script_path).unlink(missing_ok=True)
 
     return f"[WAL return code: {rc}]\n{_truncate_output(output)}"
-
-
-def _wal_fallback_python(vcd_path: str, expression: str) -> str:
-    """Minimal VCD signal-list fallback when the `wal` CLI is absent."""
-    try:
-        from wal.core import Wal  # type: ignore
-
-        w = Wal()
-        w.load(vcd_path)
-        result = w.eval(expression)
-        return str(result)
-    except Exception:
-        pass
-
-    # Last resort: parse VCD header to list signals only.
-    signals: list[str] = []
-    try:
-        with open(vcd_path) as fh:
-            for line in fh:
-                line = line.strip()
-                if line.startswith("$var"):
-                    parts = line.split()
-                    if len(parts) >= 5:
-                        signals.append(parts[4])
-                if line.startswith("$enddefinitions"):
-                    break
-    except Exception as exc:
-        return f"[WAL FALLBACK ERROR] Could not parse VCD: {exc}"
-
-    return (
-        "[WAL FALLBACK — wal CLI not installed, showing signal list only]\n"
-        f"Signals: {signals}\n"
-        f"Requested expression: {expression}\n"
-        "Install wal-lang (`pip install wal-lang`) for full analysis."
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -457,4 +416,6 @@ if __name__ == "__main__":
     )
     prompt_json = json.loads((MAIN_CODE_FOLDER_PATH / "prompt.json").read_text())
     goal = "\n\n".join(prompt_json.values())
+    print(f"\033[1;34m[GOAL]\033[0m\n{goal}\n")
+    
     main(goal)
