@@ -11,7 +11,7 @@ Inspired by: https://www.reddit.com/r/ChatGPTCoding/comments/164ughh/a_tiny_auto
 
 ### Basic Agent 3
 
-* Parameterizes the model name, and switches to the `gpt-o1-mini` model.
+* Parameterizes the model name, and switches to the `gpt-5.4-nano` model.
 """
 
 # https://docs.astral.sh/uv/guides/scripts/#declaring-script-dependencies
@@ -31,7 +31,7 @@ from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 CONFIG_MAX_ITERATIONS = 10
-CONFIG_MODEL_NAME = "gpt-o1-mini"
+CONFIG_MODEL_NAME = "gpt-5.4-nano"
 
 MAIN_CODE_FOLDER_PATH = Path("/code")
 
