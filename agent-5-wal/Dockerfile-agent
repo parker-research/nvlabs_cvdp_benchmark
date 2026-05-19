@@ -18,10 +18,13 @@ RUN apt-get update && \
 # https://docs.astral.sh/uv/guides/integration/docker/#installing-uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-WORKDIR /app
+# Add uv tool bin dir to PATH
+ENV PATH="/root/.local/bin:$PATH"
 
 # Fix uv cache path.
 RUN mkdir -p /.cache/uv && chmod -R 777 /.cache
+
+WORKDIR /app
 
 RUN uv venv --python 3.12
 RUN uv pip install openai loguru pyyaml
