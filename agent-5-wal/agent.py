@@ -1,44 +1,9 @@
-"""RTL Hardware Design Agent — Extended Edition
-================================================
-Improvements over Basic Agent 3
---------------------------------
-1.  **Tool-calling loop** — the LLM drives execution via OpenAI function-calling
-    instead of a fragile "parse the last ```bash block" heuristic.  This is the
-    pattern used by leading agents (SWE-agent, OpenHands, Devin, etc.).
-
-2.  **WAL waveform analysis tool** — when a simulation produces a VCD/FST dump
-    the agent can invoke `wal_analyze` to run WAL S-expressions directly against
-    the waveform.  The results are injected back into the conversation so the
-    model can reason about signal-level failures before deciding on its next fix.
-
-3.  **Structured reflection on failure** — after any non-zero return code the
-    agent automatically checks for waveform dumps and, if found, runs a
-    baseline WAL triage query before giving control back to the LLM.
-
-4.  **Token-budget guard** — accumulated bash output is truncated and summarised
-    rather than blindly dumped into context (prevents context-window overflow on
-    long simulation logs).
-
-5.  **Graceful iteration accounting** — the remaining-cycles counter is passed
-    to every prompt so the model can calibrate its urgency.
-
-6.  **Enhanced file tools** — three dedicated file tools replace ad-hoc bash
-    cat/heredoc patterns:
-      - read_file   : read a file (optionally a line range) without spawning a shell
-      - write_file  : atomically write a full file with no heredoc-escaping pitfalls
-      - str_replace_file : surgical in-place edit of a unique substring — preferred
-                      over full rewrites when only a few lines change
-
-"""
-
 # /// script
 # dependencies = [
 #   "openai",
 #   "wal-lang",
 # ]
 # ///
-
-from __future__ import annotations
 
 import json
 import os
@@ -53,15 +18,23 @@ from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolUnio
 # Configuration
 # ---------------------------------------------------------------------------
 
-CONFIG_MAX_ITERATIONS: int = 16  # tool-call round-trips
-CONFIG_MODEL_NAME: str = "gpt-5.4-nano"  # supports native tool-calling
-CONFIG_OUTPUT_TRUNCATE_CHARS: int = 8_000  # max chars of bash output kept in ctx
+# This is the budget that matters: how many *bash* calls the agent may make.
+# File reads/writes and WAL queries are free and do not count.
+CONFIG_MAX_BASH_CALLS: int = 12
+
+# Safety ceiling: total LLM round-trips regardless of what tools are called.
+# Prevents infinite loops if the model keeps calling file tools without
+# making progress.  Set generously — file tools are cheap.
+CONFIG_MAX_LLM_CALLS: int = 60
+
+CONFIG_MODEL_NAME: str = "gpt-5.4-nano"
+CONFIG_OUTPUT_TRUNCATE_CHARS: int = 8_000
 MAIN_CODE_FOLDER_PATH = Path("/code")
 
 client = OpenAI(api_key=os.environ["OPENAI_USER_KEY"])
 
 # ---------------------------------------------------------------------------
-# Tool schemas (OpenAI function-calling format)
+# Tool schemas
 # ---------------------------------------------------------------------------
 
 TOOLS: list[ChatCompletionToolUnionParam] = [
@@ -71,22 +44,22 @@ TOOLS: list[ChatCompletionToolUnionParam] = [
             "name": "bash",
             "description": (
                 "Execute a bash script inside the /code working directory. "
-                "Use this for compilation, simulation, running tests, installing "
-                "packages, and any operation that isn't purely file I/O. "
-                "Prefer read_file / write_file / str_replace_file for file "
-                "manipulation — they are cheaper and avoid heredoc-escaping issues. "
-                "When you are satisfied that the solution is correct and tested, "
-                "call bash with only the comment `# DONE` to signal completion."
+                "Use for compilation, simulation, running tests, installing packages, "
+                "and any operation that isn't purely file I/O. "
+                "Prefer read_file / write_file / str_replace_file for file manipulation "
+                "— they are free (don't count against your bash budget) and avoid "
+                "heredoc-escaping issues. "
+                "IMPORTANT: you have a limited number of bash calls. Use them for "
+                "compilation and simulation, not for cat/echo/sed. "
+                "When satisfied that the solution is correct and tested, call bash "
+                "with only the comment `# DONE` to signal completion."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "script": {
                         "type": "string",
-                        "description": (
-                            "Full bash script to execute. "
-                            "Use `# DONE` alone to finish."
-                        ),
+                        "description": "Full bash script to execute. Use `# DONE` alone to finish.",
                     }
                 },
                 "required": ["script"],
@@ -101,10 +74,10 @@ TOOLS: list[ChatCompletionToolUnionParam] = [
         "function": {
             "name": "read_file",
             "description": (
-                "Read the contents of a file inside /code without spawning a shell. "
-                "Optionally restrict to a line range to avoid flooding context on "
-                "large files.  Line numbers in the output are 1-based and can be "
-                "used directly with str_replace_file."
+                "Read the contents of a file inside /code. "
+                "FREE — does not count against your bash budget. "
+                "Optionally restrict to a line range. "
+                "Always call this before str_replace_file to confirm the exact text."
             ),
             "parameters": {
                 "type": "object",
@@ -115,11 +88,11 @@ TOOLS: list[ChatCompletionToolUnionParam] = [
                     },
                     "start_line": {
                         "type": "integer",
-                        "description": "First line to return (1-based, inclusive). Omit to start at line 1.",
+                        "description": "First line to return (1-based, inclusive).",
                     },
                     "end_line": {
                         "type": "integer",
-                        "description": "Last line to return (1-based, inclusive). Omit to read to end of file.",
+                        "description": "Last line to return (1-based, inclusive).",
                     },
                 },
                 "required": ["path"],
@@ -132,11 +105,10 @@ TOOLS: list[ChatCompletionToolUnionParam] = [
             "name": "write_file",
             "description": (
                 "Atomically write (or overwrite) a file inside /code. "
-                "Use this to create new RTL source files, testbenches, Makefiles, "
-                "or scripts without the quoting and escaping pitfalls of bash heredocs. "
+                "FREE — does not count against your bash budget. "
                 "Intermediate directories are created automatically. "
-                "Prefer str_replace_file when you only need to change a few lines "
-                "in an existing file."
+                "Use for new files or total rewrites. "
+                "Prefer str_replace_file for small edits to existing files."
             ),
             "parameters": {
                 "type": "object",
@@ -147,7 +119,7 @@ TOOLS: list[ChatCompletionToolUnionParam] = [
                     },
                     "content": {
                         "type": "string",
-                        "description": "Full text content to write to the file.",
+                        "description": "Full text content to write.",
                     },
                 },
                 "required": ["path", "content"],
@@ -159,33 +131,25 @@ TOOLS: list[ChatCompletionToolUnionParam] = [
         "function": {
             "name": "str_replace_file",
             "description": (
-                "Replace the first (and only) occurrence of old_str with new_str "
-                "in a file inside /code.  This is the preferred way to make surgical "
-                "edits — it is faster and less error-prone than rewriting the whole "
-                "file.  The tool fails with an error if old_str appears more than once "
-                "or is not found at all, so always call read_file first to confirm the "
-                "exact text to match (whitespace and indentation included)."
+                "Replace the first (and only) occurrence of old_str with new_str in a file. "
+                "FREE — does not count against your bash budget. "
+                "Fails if old_str appears more than once or is not found. "
+                "Always call read_file first to confirm the exact text to match."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path to the file, relative to /code.",
+                        "description": "Path relative to /code.",
                     },
                     "old_str": {
                         "type": "string",
-                        "description": (
-                            "Exact substring to find (including surrounding whitespace "
-                            "and newlines).  Must appear exactly once in the file."
-                        ),
+                        "description": "Exact substring to replace (must appear exactly once).",
                     },
                     "new_str": {
                         "type": "string",
-                        "description": (
-                            "Replacement text.  May be empty to delete old_str. "
-                            "Indentation must match the target file's convention."
-                        ),
+                        "description": "Replacement text. May be empty to delete old_str.",
                     },
                 },
                 "required": ["path", "old_str", "new_str"],
@@ -201,16 +165,16 @@ TOOLS: list[ChatCompletionToolUnionParam] = [
             "name": "wal_analyze",
             "description": (
                 "Analyze a VCD or FST waveform file using WAL (Waveform Analysis Language). "
+                "FREE — does not count against your bash budget. "
                 "WAL uses S-expression syntax. Useful primitives:\n"
                 "  SIGNALS                      — list all signals\n"
                 "  (find <cond>)                — timesteps where condition holds\n"
                 "  (whenever <cond> <expr>)     — evaluate expr at each matching step\n"
-                "  (count <cond>)               — number of timesteps where condition holds\n"
-                "  #signal_name                 — current value of signal (shorthand)\n"
+                "  (count <cond>)               — number of timesteps where cond holds\n"
+                "  #signal_name                 — value of signal at current timestep\n"
                 "  (= sig val)  (&& a b)  (! x) — boolean combinators\n"
                 '  (print INDEX ":" #sig)       — print timestep and value\n\n'
-                "Call this tool when a simulation fails and a VCD/FST dump is available "
-                "to find the root cause before writing a fix."
+                "Call after a simulation failure when a VCD/FST dump exists."
             ),
             "parameters": {
                 "type": "object",
@@ -221,7 +185,7 @@ TOOLS: list[ChatCompletionToolUnionParam] = [
                     },
                     "expression": {
                         "type": "string",
-                        "description": "WAL S-expression to evaluate, e.g. `(find (= clk 1))`.",
+                        "description": "WAL S-expression to evaluate.",
                     },
                 },
                 "required": ["waveform_file", "expression"],
@@ -338,7 +302,7 @@ def tool_str_replace_file(path: str, old_str: str, new_str: str) -> str:
     if count > 1:
         return (
             f"[ERROR] old_str appears {count} times in {path}; "
-            "it must appear exactly once.  Make old_str longer/more specific."
+            "must appear exactly once. Make old_str longer/more specific."
         )
 
     updated = original.replace(old_str, new_str, 1)
@@ -351,9 +315,7 @@ def tool_str_replace_file(path: str, old_str: str, new_str: str) -> str:
 
     old_lines = old_str.count("\n") + 1
     new_lines = new_str.count("\n") + 1
-    return (
-        f"[OK] Replaced {old_lines}-line block with {new_lines}-line block in {path}"
-    )
+    return f"[OK] Replaced {old_lines}-line block with {new_lines}-line block in {path}"
 
 
 def tool_wal_analyze(waveform_file: str, expression: str) -> str:
@@ -388,7 +350,7 @@ def tool_wal_analyze(waveform_file: str, expression: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Automatic failure triage: dump WAL signal list on any non-zero exit
+# Waveform auto-triage (appended to bash output, not a separate message)
 # ---------------------------------------------------------------------------
 
 
@@ -401,18 +363,19 @@ def _find_latest_vcd(folder: Path) -> Path | None:
     return candidates[0] if candidates else None
 
 
-def auto_triage_waveform(bash_output: str) -> str | None:
+def _auto_triage_suffix(bash_output: str) -> str:
     """
-    If the bash output suggests a simulation failure and a waveform dump exists,
-    run an automatic WAL triage and return a descriptive string, else None.
+    If bash output looks like a failure and a waveform dump exists, run a
+    basic WAL triage and return it as a string to append to the bash result.
+    Returns empty string if no triage is warranted.
     """
     failure_keywords = ["error", "failed", "mismatch", "assertion", "FAILED", "ERROR"]
     if not any(kw.lower() in bash_output.lower() for kw in failure_keywords):
-        return None
+        return ""
 
     vcd = _find_latest_vcd(MAIN_CODE_FOLDER_PATH)
     if vcd is None:
-        return None
+        return ""
 
     rel = vcd.relative_to(MAIN_CODE_FOLDER_PATH)
     print(f"\033[0;35m[AUTO-TRIAGE]\033[0m Waveform found: {rel} — running WAL triage…")
@@ -421,19 +384,19 @@ def auto_triage_waveform(bash_output: str) -> str | None:
     signals_out = tool_wal_analyze(str(rel), "SIGNALS")
 
     # Phase 2: find first timestep where any signal is X/Z (undefined), if applicable
-    x_check_out = tool_wal_analyze(str(rel), "(find (= clk 1))")
+    clk_out = tool_wal_analyze(str(rel), "(find (= clk 1))")
 
     return (
-        f"\n--- AUTO WAL TRIAGE ({rel}) ---\n"
+        f"\n\n--- AUTO WAL TRIAGE ({rel}) ---\n"
         f"SIGNALS:\n{signals_out}\n\n"
-        f"First clk=1 timesteps (sanity check):\n{x_check_out}\n"
+        f"First clk=1 timesteps:\n{clk_out}\n"
         "--- END TRIAGE ---\n"
-        "Use wal_analyze tool with targeted expressions to dig deeper."
+        "Use wal_analyze with targeted expressions to dig deeper."
     )
 
 
 # ---------------------------------------------------------------------------
-# Conversation helpers
+# File listing helper
 # ---------------------------------------------------------------------------
 
 
@@ -450,47 +413,58 @@ You are an expert RTL hardware design agent operating in a bash shell inside \
 a Docker container. Your goal is to implement, verify, and validate the given \
 hardware design task.
 
-## Tools available
+## Budget
 
-| Tool              | When to use |
-|-------------------|-------------|
-| **bash**          | Compilation, simulation, running tests, installing packages, any shell command. |
-| **read_file**     | Read a source file (or a line range of it) before editing. Always read before str_replace_file. |
-| **write_file**    | Create or fully overwrite a file — best for new files or total rewrites. |
-| **str_replace_file** | Make a surgical edit to an existing file. Preferred over write_file when only a few lines change. Requires the exact text (call read_file first). |
-| **wal_analyze**   | Query a VCD/FST waveform after a simulation failure to locate the root cause at the signal level. |
+You have a limited number of **bash calls** ({CONFIG_MAX_BASH_CALLS} total). \
+The following tools are FREE and do NOT count against this budget:
+- read_file
+- write_file
+- str_replace_file
+- wal_analyze
 
-## File-editing workflow
+Spend your bash budget on compilation and simulation, not on cat/echo/sed — \
+use the file tools for that.
 
-* **Creating a new file** → `write_file`
-* **Changing a few lines** → `read_file` (confirm exact text) → `str_replace_file`
-* **Total rewrite of an existing file** → `write_file`
-* **Never** use bash heredocs for writing files — quoting bugs are common and \
-  write_file is cleaner.
+## Tools
 
-## General workflow
+| Tool              | Cost  | When to use |
+|-------------------|-------|-------------|
+| bash              | 1     | Compile, simulate, run tests. Use `# DONE` when finished. |
+| read_file         | free  | Read a source file (or line range) before editing. |
+| write_file        | free  | Create or fully overwrite a file. |
+| str_replace_file  | free  | Surgical edit — preferred when only a few lines change. |
+| wal_analyze       | free  | Inspect a VCD/FST waveform after a simulation failure. |
 
-1. Read all provided files and the spec carefully (`read_file`).
-2. Plan your implementation (think aloud, then act).
-3. Write RTL source (`write_file`); always make the testbench dump a VCD \
-   (`$dumpfile`/`$dumpvars`).
-4. Compile and simulate (`bash`).
-5. **On failure**: call `wal_analyze` with targeted WAL expressions to understand \
-   what went wrong at the signal level, then fix the RTL (`str_replace_file`).
-6. Iterate until all tests pass.
-7. Call `bash` with the script `# DONE` only after you have reviewed, compiled, \
-   simulated successfully, and are confident the design is correct.
+## Workflow
+
+1. Read provided files and spec carefully (`read_file` — free).
+2. Plan your implementation (think, then act).
+3. Write RTL source (`write_file` — free). Always make the testbench dump a \
+   VCD (`$dumpfile` / `$dumpvars`).
+4. Compile and simulate (`bash` — costs 1).
+5. On failure: use `wal_analyze` (free) to understand the signal-level root \
+   cause, then fix via `str_replace_file` (free). Only call bash again once \
+   you are confident the fix is correct.
+6. Repeat until all tests pass.
+7. Call `bash` with `# DONE` — but only after you have reviewed and are \
+   confident the design is correct.
+
+## File-editing discipline
+
+- New file → `write_file`
+- Small change to existing file → `read_file` (confirm exact text) → `str_replace_file`
+- Total rewrite → `write_file`
+- Never use bash heredocs for file writes.
 
 ## WAL quick reference
 
-- `SIGNALS`                       — list all signals in the waveform
-- `(find (= sig_name value))`     — timesteps where signal equals value
-- `(find (&& cond1 cond2))`       — timesteps where both conditions hold
+- `SIGNALS`                              — list all signals in the waveform
+- `(find (= sig_name value))`            — timesteps where signal equals value
+- `(find (&& cond1 cond2))`              — timesteps where both conditions hold
 - `(whenever cond (print INDEX \":\" #sig))` — print values at matching steps
-- `(count cond)`                  — count matching timesteps
-- `#signal_name`                  — signal value at current timestep
+- `(count cond)`                         — count matching timesteps
 
-Signal names usually follow the hierarchy: `top.module.signal`.
+Signal names follow the hierarchy: `top.module.signal`.
 """
 
 
@@ -507,20 +481,23 @@ def main(goal_str: str) -> None:
             "content": (
                 f"## GOAL\n{goal_str}\n\n"
                 f"## CURRENT FILE LISTING\n{_file_listing()}\n\n"
-                "Think through your overall plan, then call the `read_file` tool on "
-                "any existing files you need to understand before writing code."
+                "Think through your overall plan, then call `read_file` on any "
+                "existing files you need before writing code. "
+                f"You have {CONFIG_MAX_BASH_CALLS} bash calls available."
             ),
         },
     ]
 
     print(
         f"\033[1;32m[AGENT]\033[0m Starting — model={CONFIG_MODEL_NAME}, "
-        f"max_iterations={CONFIG_MAX_ITERATIONS}"
+        f"max_bash_calls={CONFIG_MAX_BASH_CALLS}, "
+        f"max_llm_calls={CONFIG_MAX_LLM_CALLS}"
     )
 
-    for iteration in range(CONFIG_MAX_ITERATIONS):
-        remaining = CONFIG_MAX_ITERATIONS - iteration - 1
+    bash_calls_used: int = 0
+    llm_calls_used: int = 0
 
+    while llm_calls_used < CONFIG_MAX_LLM_CALLS:
         # ── LLM call ──────────────────────────────────────────────────────
         response = client.chat.completions.create(
             model=CONFIG_MODEL_NAME,
@@ -528,6 +505,7 @@ def main(goal_str: str) -> None:
             tools=TOOLS,
             tool_choice="auto",
         )
+        llm_calls_used += 1
         msg = response.choices[0].message
         messages.append(msg)  # type: ignore[arg-type]
 
@@ -541,8 +519,11 @@ def main(goal_str: str) -> None:
             break
 
         # ── Process every tool call in this turn ──────────────────────────
-        all_done = False
+        # All results are collected first, then appended atomically.
+        # A budget nudge is only added if this turn contained a bash call.
         tool_results: list[ChatCompletionMessageParam] = []
+        all_done = False
+        bash_called_this_turn = False
 
         for tc in msg.tool_calls:
             fn_name = tc.function.name
@@ -551,18 +532,29 @@ def main(goal_str: str) -> None:
                 f"\n\033[0;36m[TOOL CALL]\033[0m {fn_name}({json.dumps(fn_args, indent=2)})"
             )
 
-            # ── bash ──────────────────────────────────────────────────────
             if fn_name == "bash":
-                is_done, output = tool_bash(fn_args["script"])
-                print(f"\033[0;32m[TOOL OUTPUT]\033[0m\n{output}")
-
-                if is_done:
-                    all_done = True
-                    tool_content = "Execution complete. DONE signal received."
+                # ── Check budget before executing ──────────────────────────
+                if (
+                    bash_calls_used >= CONFIG_MAX_BASH_CALLS
+                    and fn_args["script"].strip() != "# DONE"
+                ):
+                    tool_content = (
+                        f"[ERROR] Bash budget exhausted ({CONFIG_MAX_BASH_CALLS} calls used). "
+                        "You must call bash with `# DONE` or the run will be terminated."
+                    )
+                    print(f"\033[0;31m[BUDGET]\033[0m {tool_content}")
                 else:
-                    # Automatic waveform triage on failure
-                    triage = auto_triage_waveform(output)
-                    tool_content = output + (triage or "")
+                    bash_calls_used += 1
+                    bash_called_this_turn = True
+                    is_done, output = tool_bash(fn_args["script"])
+                    print(f"\033[0;32m[TOOL OUTPUT]\033[0m\n{output}")
+
+                    if is_done:
+                        all_done = True
+                        tool_content = "Execution complete. DONE signal received."
+                    else:
+                        triage = _auto_triage_suffix(output)
+                        tool_content = output + triage
 
                 tool_results.append(
                     {
@@ -572,60 +564,42 @@ def main(goal_str: str) -> None:
                     }
                 )
 
-            # ── read_file ─────────────────────────────────────────────────
             elif fn_name == "read_file":
                 output = tool_read_file(
                     fn_args["path"],
                     fn_args.get("start_line"),
                     fn_args.get("end_line"),
                 )
-                print(f"\033[0;32m[FILE READ]\033[0m\n{output[:400]}{'…' if len(output) > 400 else ''}")
+                print(
+                    f"\033[0;32m[FILE READ]\033[0m\n{output[:400]}{'…' if len(output) > 400 else ''}"
+                )
                 tool_results.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": output,
-                    }
+                    {"role": "tool", "tool_call_id": tc.id, "content": output}
                 )
 
-            # ── write_file ────────────────────────────────────────────────
             elif fn_name == "write_file":
                 output = tool_write_file(fn_args["path"], fn_args["content"])
                 print(f"\033[0;32m[FILE WRITE]\033[0m {output}")
                 tool_results.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": output,
-                    }
+                    {"role": "tool", "tool_call_id": tc.id, "content": output}
                 )
 
-            # ── str_replace_file ──────────────────────────────────────────
             elif fn_name == "str_replace_file":
                 output = tool_str_replace_file(
                     fn_args["path"], fn_args["old_str"], fn_args["new_str"]
                 )
                 print(f"\033[0;32m[FILE EDIT]\033[0m {output}")
                 tool_results.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": output,
-                    }
+                    {"role": "tool", "tool_call_id": tc.id, "content": output}
                 )
 
-            # ── wal_analyze ───────────────────────────────────────────────
             elif fn_name == "wal_analyze":
                 output = tool_wal_analyze(
                     fn_args["waveform_file"], fn_args["expression"]
                 )
                 print(f"\033[0;32m[WAL OUTPUT]\033[0m\n{output}")
                 tool_results.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": output,
-                    }
+                    {"role": "tool", "tool_call_id": tc.id, "content": output}
                 )
 
             else:
@@ -637,28 +611,40 @@ def main(goal_str: str) -> None:
                     }
                 )
 
-        # Append all tool results, then inject remaining-cycle hint
+        # Append all tool results atomically
         messages.extend(tool_results)
 
         if all_done:
             print(
-                f"\n\033[1;32m[AGENT]\033[0m Done after {iteration + 1} iteration(s)."
+                f"\n\033[1;32m[AGENT]\033[0m Done. "
+                f"bash calls used: {bash_calls_used}/{CONFIG_MAX_BASH_CALLS}, "
+                f"LLM calls: {llm_calls_used}/{CONFIG_MAX_LLM_CALLS}"
             )
             return
 
-        # Nudge the model with the budget countdown
-        messages.append(
-            {
-                "role": "user",
-                "content": (
-                    f"You have {remaining} iteration(s) remaining. "
-                    "Continue — call the next tool."
-                ),
-            }
-        )
+        # ── Budget nudge — only after a bash call, not after file ops ─────
+        # This avoids incentivising the model to skip read-before-edit checks.
+        if bash_called_this_turn:
+            bash_remaining = CONFIG_MAX_BASH_CALLS - bash_calls_used
+            if bash_remaining <= 3:
+                urgency = (
+                    f"WARNING: only {bash_remaining} bash call(s) remaining. "
+                    "Fix remaining issues with str_replace_file (free) and "
+                    "make your next bash call count. "
+                    "Call `# DONE` if the design is complete."
+                )
+            else:
+                urgency = (
+                    f"{bash_remaining} bash call(s) remaining. "
+                    "Continue — call your next tool."
+                )
+            messages.append({"role": "user", "content": urgency})
+        # No nudge after file-only turns: just let the model continue naturally.
 
     raise RuntimeError(
-        f"Max iterations reached ({CONFIG_MAX_ITERATIONS}) without DONE signal."
+        f"Iteration limit reached — "
+        f"bash calls: {bash_calls_used}/{CONFIG_MAX_BASH_CALLS}, "
+        f"LLM calls: {llm_calls_used}/{CONFIG_MAX_LLM_CALLS}"
     )
 
 
@@ -668,8 +654,9 @@ def main(goal_str: str) -> None:
 
 if __name__ == "__main__":
     print(
-        f"RTL Design Agent — model={CONFIG_MODEL_NAME}, "
-        f"max_iterations={CONFIG_MAX_ITERATIONS}"
+        f"RTL Design Agent (Fixed) — model={CONFIG_MODEL_NAME}, "
+        f"max_bash_calls={CONFIG_MAX_BASH_CALLS}, "
+        f"max_llm_calls={CONFIG_MAX_LLM_CALLS}"
     )
     prompt_json = json.loads((MAIN_CODE_FOLDER_PATH / "prompt.json").read_text())
     goal = "\n\n".join(prompt_json.values())
