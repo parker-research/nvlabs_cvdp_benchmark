@@ -517,7 +517,7 @@ def main(goal_str: str) -> None:
         # ── No tool call → model is done or stuck ─────────────────────────
         if not msg.tool_calls:
             print("\033[0;31m[AGENT]\033[0m Model returned no tool call — stopping.")
-            break
+            return
 
         # ── Process every tool call in this turn ──────────────────────────
         # All results are collected first, then appended atomically.

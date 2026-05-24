@@ -23,6 +23,7 @@ ENV PATH="/root/.local/bin:$PATH"
 
 # Fix uv cache path.
 RUN mkdir -p /.cache/uv && chmod -R 777 /.cache
+RUN mkdir -p /.local/share/uv && chmod -R 777 /.local/share/uv
 
 WORKDIR /app
 
