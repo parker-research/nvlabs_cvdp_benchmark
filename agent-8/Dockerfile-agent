@@ -35,6 +35,8 @@ RUN uv tool install git+https://github.com/ics-jku/wal.git
 RUN which wal
 RUN wal --version
 RUN /root/.local/bin/wal --version
+RUN cp /root/.local/bin/wal /usr/local/bin/wal
+RUN chmod 755 /usr/local/bin/wal
 
 # Create /code directory and set permissions
 RUN mkdir -p /code && chmod 777 /code
