@@ -24,6 +24,7 @@ Upgrades over Basic Agent 3
 """
 
 # /// script
+# requires-python = ">=3.12"
 # dependencies = [
 #   "openai",
 # ]

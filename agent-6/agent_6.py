@@ -7,6 +7,7 @@
 
 # https://docs.astral.sh/uv/guides/scripts/#declaring-script-dependencies
 # /// script
+# requires-python = ">=3.12"
 # dependencies = [
 #   "openai",
 # ]
