@@ -44,7 +44,7 @@ from openai.types.chat import ChatCompletionMessageParam
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-CONFIG_MODEL_NAME = "gpt-o1-mini"
+CONFIG_MODEL_NAME = "gpt-5.4-mini"
 CONFIG_MAX_ITERATIONS = 16  # outer loop
 CONFIG_MAX_RETRIES = 3  # per-tool transient retry
 CONFIG_CMD_TIMEOUT = 60  # seconds per shell command
