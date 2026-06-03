@@ -26,9 +26,9 @@ CONFIG_MAX_BASH_CALLS: int = 12
 # Safety ceiling: total LLM round-trips regardless of what tools are called.
 # Prevents infinite loops if the model keeps calling file tools without
 # making progress.  Set generously — file tools are cheap.
-CONFIG_MAX_LLM_CALLS: int = 60
+CONFIG_MAX_LLM_CALLS: int = 45
 
-CONFIG_MODEL_NAME: str = "gpt-5.4-nano"
+CONFIG_MODEL_NAME: str = "gpt-5.4-mini"
 CONFIG_OUTPUT_TRUNCATE_CHARS: int = 8_000
 MAIN_CODE_FOLDER_PATH = Path("/code")
 
