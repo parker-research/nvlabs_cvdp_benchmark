@@ -29,7 +29,7 @@ from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 CONFIG_MAX_ITERATIONS = 10
-CONFIG_MODEL_NAME = "gpt-5.4-nano"
+CONFIG_MODEL_NAME = "gpt-5.4-mini"
 
 MAIN_CODE_FOLDER_PATH = Path("/code")
 

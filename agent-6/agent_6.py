@@ -1,6 +1,6 @@
 """Minimalistic agent to run inside a Docker container for writing RTL code.
 
-### Basic Agent 4
+### Basic Agent 6
 
 * Uses the tool-calling API instead of manually parsing bash blocks from responses.
 """
@@ -22,7 +22,7 @@ from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolUnionParam
 
 CONFIG_MAX_ITERATIONS = 10
-CONFIG_MODEL_NAME = "gpt-5.4-nano"
+CONFIG_MODEL_NAME = "gpt-5.4-mini"
 
 MAIN_CODE_FOLDER_PATH = Path("/code")
 
