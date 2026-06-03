@@ -19,6 +19,7 @@ from pathlib import Path
 import subprocess
 import os
 import json
+import shutil
 import tempfile
 
 from openai import OpenAI
@@ -29,6 +30,8 @@ CONFIG_MODEL_NAME = "gpt-5.4-mini"
 
 MAIN_CODE_FOLDER_PATH = Path("/code")
 WAL_REFERENCE_GUIDE_PATH = Path("/app/wal_reference_guide.md")
+
+WAL_EXECUTABLE = shutil.which("wal") or "/root/.local/bin/wal"
 
 client = OpenAI(api_key=os.environ["OPENAI_USER_KEY"])
 
@@ -205,7 +208,7 @@ def _execute_wal_script(script: str) -> tuple[int, bytes]:
         wal_path = Path(temp_dir_str) / "analysis.wal"
         wal_path.write_text(script)
         with subprocess.Popen(
-            ["wal", wal_path.resolve().as_posix()],
+            [WAL_EXECUTABLE, wal_path.resolve().as_posix()],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             cwd=MAIN_CODE_FOLDER_PATH.as_posix(),

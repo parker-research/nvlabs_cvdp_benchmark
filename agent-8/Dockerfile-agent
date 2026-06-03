@@ -33,6 +33,8 @@ RUN uv pip install openai loguru pyyaml
 # Install the waveform analysis language
 RUN uv tool install git+https://github.com/ics-jku/wal.git
 RUN which wal
+RUN wal --version
+RUN /root/.local/bin/wal --version
 
 # Create /code directory and set permissions
 RUN mkdir -p /code && chmod 777 /code
