@@ -1,7 +1,5 @@
 """Minimalistic agent to run inside a Docker container for writing RTL code.
 
-Inspired by: https://www.reddit.com/r/ChatGPTCoding/comments/164ughh/a_tiny_autonomous_agent_i_made_in_25_lines_of/
-
 ### Basic Agent 2
 
 * Uses roughly half as many conversation cycles as Basic Agent 1.
