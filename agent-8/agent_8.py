@@ -148,8 +148,14 @@ You have four tools:
   - run_wal    — write and execute a WAL (Waveform Analysis Language) script
 
 All common open source tools are available (e.g., iverilog, verilator).
-When a simulation produces a waveform dump (.vcd or similar), prefer run_wal over
-ad-hoc grep/awk to query and audit signals — it is purpose-built for that job.
+
+## Simulation & Waveform Workflow
+After compiling with iverilog, simulate with vvp using the -vcd flag to capture
+a waveform dump, for example:
+    vvp rundir/sim.out -vcd rundir/sim.vcd
+Then use run_wal (not grep/awk) to query and audit signals in the resulting .vcd file.
+This is mandatory on failures and repeat runs. If you've generated at least one bad solution,
+do not mark a task done after without generating and inspecting a VCD.
 
 Run tests when you've finished the solution.
 Call run_bash with done=true when you've reviewed, tested, and validated your work
