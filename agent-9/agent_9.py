@@ -152,7 +152,7 @@ and are ready to submit it to your boss (who hates to be bothered by incomplete 
 After compiling with iverilog, simulate with vvp using the -vcd flag to capture
 a waveform dump, for example:
     vvp rundir/sim.out -vcd rundir/sim.vcd
-Then use run_wal (not grep/awk) to query and audit signals in the resulting .vcd file.
+Then use summarize_vcd and any other tools to query and audit signals in the resulting .vcd file.
 This is mandatory on failures and repeat runs. If you've generated at least one bad solution,
 do not mark a task done after without generating and inspecting a VCD.
 """
