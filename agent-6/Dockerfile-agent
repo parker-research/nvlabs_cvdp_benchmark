@@ -22,6 +22,7 @@ WORKDIR /app
 
 # Fix uv cache path.
 RUN mkdir -p /.cache/uv && chmod -R 777 /.cache
+RUN mkdir -p /.local/share/uv && chmod -R 777 /.local/share/uv
 
 RUN uv venv --python 3.12
 RUN uv pip install openai loguru pyyaml
